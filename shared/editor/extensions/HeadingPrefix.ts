@@ -10,6 +10,7 @@ import { changedDescendants } from "../lib/changedDescendants";
 import Extension from "../lib/Extension";
 import { isRemoteTransaction } from "../lib/multiplayer";
 import { EditorStyleHelper } from "../styles/EditorStyleHelper";
+import { sanitizeClipboardHTML } from "../lib/markdown/clipboardSerializer";
 
 /**
  * Plugin key used to change the heading prefix style at runtime by dispatching
@@ -377,7 +378,10 @@ export default class HeadingPrefix extends Extension<HeadingPrefixOptions> {
 
     event.preventDefault();
     event.clipboardData.clearData();
-    event.clipboardData.setData("text/html", dom.innerHTML);
+    event.clipboardData.setData(
+      "text/html",
+      sanitizeClipboardHTML(dom.innerHTML)
+    );
     event.clipboardData.setData("text/plain", text);
     return true;
   };

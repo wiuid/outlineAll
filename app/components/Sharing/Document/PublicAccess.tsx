@@ -75,7 +75,14 @@ function PublicAccess(
           copy(newShare.url);
           toast.success(t("Public link copied to clipboard"));
         } else if (share) {
-          await share.save({ published: checked });
+          await share.save({
+            published: checked,
+            ...(checked &&
+            share.expiresAt &&
+            new Date(share.expiresAt) <= new Date()
+              ? { expiresAt: null }
+              : {}),
+          });
           if (checked) {
             copy(share.url);
             toast.success(t("Public link copied to clipboard"));
@@ -182,7 +189,10 @@ function PublicAccess(
           sharedParent && !document.isDraft ? null : (
             <Switch
               aria-label={t("Publish to internet")}
-              checked={share?.published ?? false}
+              checked={Boolean(
+                share?.published &&
+                (!share.expiresAt || new Date(share.expiresAt) > new Date())
+              )}
               onChange={handlePublishedChange}
               disabled={!canPublish || creating}
               width={26}

@@ -46,8 +46,26 @@ import {
 import shareDomains from "@server/middlewares/shareDomains";
 import env from "@server/env";
 import { safeEqual } from "@server/utils/crypto";
+import {
+  getDefaultShareExpiryDate,
+  isShareExpiryWithinLimit,
+} from "@shared/utils/shareExpiry";
 
 const router = new Router();
+
+function validateShareExpiry(expiresAt: Date | null | undefined) {
+  if (expiresAt === null) {
+    throw InvalidRequestError("Public shares must expire within 30 days");
+  }
+  if (
+    expiresAt &&
+    (expiresAt.getTime() <= Date.now() || !isShareExpiryWithinLimit(expiresAt))
+  ) {
+    throw InvalidRequestError(
+      "Share expiration must be in the future and no more than 30 days"
+    );
+  }
+}
 
 router.post(
   "shares.info",
@@ -277,6 +295,7 @@ router.post(
       allowSubscriptions,
       showLastUpdated,
       showTOC,
+      expiresAt,
     } = ctx.input.body;
     const { user } = ctx.state.auth;
     authorize(user, "createShare", user.team);
@@ -306,6 +325,10 @@ router.post(
       authorize(user, "read", collection);
     }
 
+    if (published) {
+      validateShareExpiry(expiresAt);
+    }
+
     const [share] = await Share.findOrCreateWithCtx(ctx, {
       where: {
         collectionId: collectionId ?? null,
@@ -322,6 +345,9 @@ router.post(
         showLastUpdated,
         showTOC,
         urlId,
+        expiresAt: published
+          ? (expiresAt ?? getDefaultShareExpiryDate())
+          : (expiresAt ?? null),
       },
     });
 
@@ -362,6 +388,7 @@ router.post(
       allowSubscriptions,
       showLastUpdated,
       showTOC,
+      expiresAt,
       title,
       iconUrl,
     } = ctx.input.body;
@@ -381,6 +408,17 @@ router.post(
       if (published) {
         share.includeChildDocuments = true;
       }
+    }
+
+    if (expiresAt !== undefined) {
+      if (expiresAt === null && published === false) {
+        share.expiresAt = null;
+      } else {
+        validateShareExpiry(expiresAt);
+        share.expiresAt = expiresAt;
+      }
+    } else if (share.published && !share.expiresAt) {
+      share.expiresAt = getDefaultShareExpiryDate();
     }
 
     if (includeChildDocuments !== undefined) {

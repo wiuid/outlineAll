@@ -15,6 +15,7 @@ import Italic from "../marks/Italic";
 import Link from "../marks/Link";
 import TemplatePlaceholder from "../marks/Placeholder";
 import Strikethrough from "../marks/Strikethrough";
+import TextColor from "../marks/TextColor";
 import Underline from "../marks/Underline";
 import Attachment from "./Attachment";
 import Blockquote from "./Blockquote";
@@ -122,6 +123,7 @@ export const richExtensions: Nodes = [
   HeadingPrefix,
   HorizontalRule,
   Highlight,
+  TextColor,
   TemplatePlaceholder,
   Math,
   MathBlock,

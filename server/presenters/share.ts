@@ -42,6 +42,7 @@ export default function presentShare(share: Share, options: Options = {}) {
     domain: share.domain,
     createdAt: share.createdAt,
     updatedAt: share.updatedAt,
+    expiresAt: share.expiresAt,
   };
 
   if (!options.isAdmin) {

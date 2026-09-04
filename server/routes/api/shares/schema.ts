@@ -59,6 +59,7 @@ export const SharesUpdateSchema = BaseSchema.extend({
     allowSubscriptions: z.boolean().optional(),
     showLastUpdated: z.boolean().optional(),
     showTOC: z.boolean().optional(),
+    expiresAt: z.coerce.date().nullish(),
     title: z.string().max(ShareValidation.maxTitleLength).nullish(),
     iconUrl: z
       .string()
@@ -96,6 +97,7 @@ export const SharesCreateSchema = BaseSchema.extend({
         })
         .optional(),
       includeChildDocuments: z.boolean().prefault(false),
+      expiresAt: z.coerce.date().nullish(),
     })
     .refine((obj) => !(isEmpty(obj.collectionId) && isEmpty(obj.documentId)), {
       error: "one of collectionId or documentId is required",

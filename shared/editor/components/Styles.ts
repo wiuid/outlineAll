@@ -427,6 +427,75 @@ const findAndReplaceStyle = (props: Props) => css`
   }
 `;
 
+const textColorStyle = (props: Props) => css`
+  [data-text-color="light-red"] {
+    color: ${props.theme.isDark ? "#ff8095" : "#c53030"};
+  }
+  [data-text-color="dark-red"] {
+    color: ${props.theme.isDark ? "#ff6b81" : "#9b2c2c"};
+  }
+  [data-text-color="light-orange"] {
+    color: ${props.theme.isDark ? "#ffad70" : "#c05621"};
+  }
+  [data-text-color="dark-orange"] {
+    color: ${props.theme.isDark ? "#ff935c" : "#9c4221"};
+  }
+  [data-text-color="light-yellow"] {
+    color: ${props.theme.isDark ? "#ffd166" : "#975a16"};
+  }
+  [data-text-color="dark-yellow"] {
+    color: ${props.theme.isDark ? "#f6c453" : "#744210"};
+  }
+  [data-text-color="light-green"] {
+    color: ${props.theme.isDark ? "#68d391" : "#2f855a"};
+  }
+  [data-text-color="dark-green"] {
+    color: ${props.theme.isDark ? "#48bb78" : "#276749"};
+  }
+  [data-text-color="light-cyan"] {
+    color: ${props.theme.isDark ? "#63d6d6" : "#2c7a7b"};
+  }
+  [data-text-color="dark-cyan"] {
+    color: ${props.theme.isDark ? "#38b2ac" : "#285e61"};
+  }
+  [data-text-color="light-blue"] {
+    color: ${props.theme.isDark ? "#63b3ed" : "#2b6cb0"};
+  }
+  [data-text-color="dark-blue"] {
+    color: ${props.theme.isDark ? "#4299e1" : "#2c5282"};
+  }
+  [data-text-color="light-purple"] {
+    color: ${props.theme.isDark ? "#b794f4" : "#6b46c1"};
+  }
+  [data-text-color="dark-purple"] {
+    color: ${props.theme.isDark ? "#9f7aea" : "#553c9a"};
+  }
+  [data-text-color="light-gray"] {
+    color: ${props.theme.isDark ? "#cbd5e0" : "#718096"};
+  }
+  [data-text-color="dark-gray"] {
+    color: ${props.theme.isDark ? "#a0aec0" : "#4a5568"};
+  }
+  [data-text-color="red"] {
+    color: ${props.theme.isDark ? "#ff7690" : "#c51f4a"};
+  }
+  [data-text-color="orange"] {
+    color: ${props.theme.isDark ? "#ffb15a" : "#a94f00"};
+  }
+  [data-text-color="green"] {
+    color: ${props.theme.isDark ? "#5ae6a0" : "#087a3d"};
+  }
+  [data-text-color="blue"] {
+    color: ${props.theme.isDark ? "#68b5ff" : "#1459ad"};
+  }
+  [data-text-color="purple"] {
+    color: ${props.theme.isDark ? "#c49aff" : "#6c35ac"};
+  }
+  [data-text-color="gray"] {
+    color: ${props.theme.textSecondary};
+  }
+`;
+
 const emailStyle = (props: Props) => css`
   .attachment {
     display: block;
@@ -1797,7 +1866,7 @@ mark {
   color: ${props.theme.text};
 
   a {
-    color: ${props.theme.text};
+    color: ${props.theme.link};
   }
 }
 
@@ -2858,6 +2927,7 @@ const EditorContainer = styled.div<Props>`
   ${codeBlockStyle}
   ${diffStyle}
   ${findAndReplaceStyle}
+  ${textColorStyle}
   ${emailStyle}
   ${textStyle}
 `;

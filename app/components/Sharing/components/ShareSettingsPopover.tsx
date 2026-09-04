@@ -15,11 +15,17 @@ import { s } from "@shared/styles";
 import { HStack } from "~/components/primitives/HStack";
 import { AttachmentPreset } from "@shared/types";
 import { AttachmentValidation } from "@shared/validations";
+import {
+  MAX_SHARE_EXPIRY_DAYS,
+  getShareExpiryDate,
+  type ShareExpiryPreset,
+} from "@shared/utils/shareExpiry";
 import type Share from "~/models/Share";
 import { createAction } from "~/actions";
 import { ShareSection } from "~/actions/sections";
 import { AvatarSize } from "~/components/Avatar";
 import Input from "~/components/Input";
+import { InputSelect } from "~/components/InputSelect";
 import { DropdownMenu } from "~/components/Menu/DropdownMenu";
 import NudeButton from "~/components/NudeButton";
 import Switch from "~/components/Switch";
@@ -57,6 +63,9 @@ function ShareSettingsPopover({ share, children }: Props) {
   const fileInputRef = React.useRef<HTMLInputElement>(null);
   const hasChangesRef = React.useRef(false);
   const [isUploading, setIsUploading] = React.useState(false);
+  const [expiryPreset, setExpiryPreset] = React.useState<ShareExpiryPreset>(
+    share.expiresAt ? "custom" : "1d"
+  );
   const idPrefix = React.useMemo(() => uniqueId("share-settings-"), []);
   const showLastUpdatedId = `${idPrefix}-show-last-updated`;
   const showTOCId = `${idPrefix}-show-toc`;
@@ -167,6 +176,47 @@ function ShareSettingsPopover({ share, children }: Props) {
       }
     },
     [share]
+  );
+
+  const handleExpiryChanged = React.useCallback(
+    async (value: string) => {
+      const preset = value as ShareExpiryPreset;
+      setExpiryPreset(preset);
+      if (preset === "custom") {
+        return;
+      }
+      try {
+        await share.save({
+          expiresAt: getShareExpiryDate(preset)?.toISOString() ?? null,
+        });
+        hasChangesRef.current = true;
+      } catch (err) {
+        toast.error(errToString(err));
+      }
+    },
+    [share]
+  );
+
+  const handleCustomExpiryChanged = React.useCallback(
+    async (ev: React.ChangeEvent<HTMLInputElement>) => {
+      const date = new Date(ev.target.value);
+      if (
+        Number.isNaN(date.getTime()) ||
+        date.getTime() <= Date.now() ||
+        date.getTime() >
+          Date.now() + MAX_SHARE_EXPIRY_DAYS * 24 * 60 * 60 * 1000
+      ) {
+        toast.error(t("Expiration time must be in the future"));
+        return;
+      }
+      try {
+        await share.save({ expiresAt: date.toISOString() });
+        hasChangesRef.current = true;
+      } catch (err) {
+        toast.error(errToString(err));
+      }
+    },
+    [share, t]
   );
 
   const flushChangeToast = React.useCallback(() => {
@@ -336,6 +386,27 @@ function ShareSettingsPopover({ share, children }: Props) {
             />
           }
         />
+        <Text as="h3" weight="bold" style={{ marginTop: 16 }}>
+          {t("Link expiration")}
+        </Text>
+        <InputSelect
+          label={t("Automatically unpublish")}
+          options={["1h", "1d", "7d", "30d", "custom"].map((value) => ({
+            type: "item" as const,
+            value,
+            label: t(value),
+          }))}
+          value={expiryPreset}
+          onChange={handleExpiryChanged}
+        />
+        {expiryPreset === "custom" ? (
+          <Input
+            type="datetime-local"
+            label={t("Custom expiration time")}
+            defaultValue={share.expiresAt?.slice(0, 16) ?? ""}
+            onChange={handleCustomExpiryChanged}
+          />
+        ) : null}
         <Text as="h3" weight="bold" style={{ marginTop: 16 }}>
           {t("Behavior")}
         </Text>

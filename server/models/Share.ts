@@ -120,6 +120,11 @@ class Share extends IdModel<
   @Column(DataType.DATE)
   lastAccessedAt: Date | null;
 
+  /** Optional time at which the public share becomes inaccessible. */
+  @AllowNull
+  @Column(DataType.DATE)
+  expiresAt: Date | null;
+
   /** Total count of times the shared link has been accessed */
   @Default(0)
   @Column(DataType.INTEGER)
@@ -302,6 +307,10 @@ class Share extends IdModel<
         teamId,
         published: true,
         revokedAt: { [Op.is]: null },
+        [Op.or]: [
+          { expiresAt: { [Op.is]: null } },
+          { expiresAt: { [Op.gt]: new Date() } },
+        ],
         [column]: values,
       },
       // Deterministic order so the same share consistently wins when a

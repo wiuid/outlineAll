@@ -68,6 +68,11 @@ class Share extends Model implements Searchable {
   @observable
   lastAccessedAt: string | null | undefined = undefined;
 
+  /** Optional time at which the public share becomes inaccessible. */
+  @Field
+  @observable
+  expiresAt: string | null | undefined = undefined;
+
   @observable
   url: string;
 

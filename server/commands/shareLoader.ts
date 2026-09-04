@@ -33,11 +33,19 @@ export async function loadPublicShare({
     throw InvalidRequestError("teamId required for fetching share using urlId");
   }
 
-  const where: WhereOptions<Share> = {
+  const where = {
     revokedAt: {
       [Op.is]: null,
     },
     published: true,
+    [Op.or]: [
+      { expiresAt: { [Op.is]: null } },
+      { expiresAt: { [Op.gt]: new Date() } },
+    ],
+  } as WhereOptions<Share> & {
+    id?: string;
+    teamId?: string;
+    urlId?: string;
   };
 
   if (urlId) {
