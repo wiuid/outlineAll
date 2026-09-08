@@ -124,12 +124,14 @@ const Header = styled.div`
     width: ${MOBILE_HEADER_WIDTH}px;
     height: 36px;
     padding: 6px 8px;
-    background: var(--theme-bg, #fff);
+    background: transparent;
     border-bottom: 1px solid rgba(0, 0, 0, 0.08);
+    pointer-events: none;
   }
 `;
 
 const MobileMenuButton = styled(Button)`
+  pointer-events: auto;
   display: none;
 
   @media (max-width: 768px) {
@@ -143,6 +145,7 @@ const MobileMenuButton = styled(Button)`
 `;
 
 const Title = styled.button`
+  pointer-events: auto;
   max-width: 100%;
   min-width: 0;
   overflow: hidden;
@@ -162,8 +165,8 @@ const Title = styled.button`
 `;
 
 const TitleInput = styled.input`
+  pointer-events: auto;
   width: 100%;
-  min-width: 0;
   padding: 2px 6px;
   border: 1px solid #4c9aff;
   border-radius: 4px;
@@ -276,13 +279,34 @@ function TableDocument({ document, readOnly }: Props) {
         ) {
           return;
         }
-        const toolbar = Array.from(
-          containerElement.querySelectorAll<HTMLElement>("[class*='toolbar']")
-        ).find((element) => {
-          const rect = element.getBoundingClientRect();
-          return rect.top < 48 && rect.height >= 24 && rect.height <= 64 && rect.width > 160;
-        });
-        if (!toolbar) {
+        const findLeaf = (label: string) =>
+          Array.from(containerElement.querySelectorAll<HTMLElement>("*"))
+            .filter(
+              (element) =>
+                element.children.length === 0 && element.textContent?.trim() === label
+            )
+            .find((element) => {
+              const rect = element.getBoundingClientRect();
+              return rect.top < 64 && rect.width > 0 && rect.height > 0;
+            });
+        const startTab = findLeaf("开始");
+        const formulaTab = findLeaf("公式");
+        let toolbar = startTab?.parentElement;
+        while (toolbar && toolbar !== containerElement) {
+          const rect = toolbar.getBoundingClientRect();
+          if (
+            formulaTab &&
+            toolbar.contains(formulaTab) &&
+            rect.top < 48 &&
+            rect.height >= 24 &&
+            rect.height <= 64 &&
+            rect.width > 160
+          ) {
+            break;
+          }
+          toolbar = toolbar.parentElement;
+        }
+        if (!toolbar || toolbar === containerElement) {
           return;
         }
         mobileToolbarAdjustments.push({
