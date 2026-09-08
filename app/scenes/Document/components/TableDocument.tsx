@@ -289,6 +289,7 @@ function TableDocument({ document, readOnly }: Props) {
         touchAction: string;
         overscrollBehaviorX: string;
         paddingLeft: string;
+        justifyContent: string;
       }> = [];
       let toolbarObserver: MutationObserver | undefined;
       let toolbarFrame = 0;
@@ -299,34 +300,10 @@ function TableDocument({ document, readOnly }: Props) {
         ) {
           return;
         }
-        const findLeaf = (label: string) =>
-          Array.from(containerElement.querySelectorAll<HTMLElement>("*"))
-            .filter(
-              (element) =>
-                element.children.length === 0 && element.textContent?.trim() === label
-            )
-            .find((element) => {
-              const rect = element.getBoundingClientRect();
-              return rect.top < 64 && rect.width > 0 && rect.height > 0;
-            });
-        const startTab = findLeaf("开始");
-        const formulaTab = findLeaf("公式");
-        let toolbar = startTab?.parentElement;
-        while (toolbar && toolbar !== containerElement) {
-          const rect = toolbar.getBoundingClientRect();
-          if (
-            formulaTab &&
-            toolbar.contains(formulaTab) &&
-            rect.top < 48 &&
-            rect.height >= 24 &&
-            rect.height <= 64 &&
-            rect.width > 160
-          ) {
-            break;
-          }
-          toolbar = toolbar.parentElement;
-        }
-        if (!toolbar || toolbar === containerElement) {
+        const toolbar = containerElement.querySelector<HTMLElement>(
+          '[data-u-comp="ribbon-header-menu"] > [role="tablist"]'
+        );
+        if (!toolbar) {
           return;
         }
         mobileToolbarAdjustments.push({
@@ -338,12 +315,14 @@ function TableDocument({ document, readOnly }: Props) {
           touchAction: toolbar.style.touchAction,
           overscrollBehaviorX: toolbar.style.overscrollBehaviorX,
           paddingLeft: toolbar.style.paddingLeft,
+          justifyContent: toolbar.style.justifyContent,
         });
         const headerWidth =
           headerRef.current?.getBoundingClientRect().width ?? MOBILE_HEADER_WIDTH;
         toolbar.style.marginLeft = "0";
         toolbar.style.width = "100%";
         toolbar.style.paddingLeft = `${headerWidth}px`;
+        toolbar.style.justifyContent = "flex-start";
         toolbar.style.overflowX = "auto";
         toolbar.style.overflowY = "hidden";
         toolbar.style.touchAction = "pan-x";
@@ -394,6 +373,7 @@ function TableDocument({ document, readOnly }: Props) {
             touchAction,
             overscrollBehaviorX,
             paddingLeft,
+            justifyContent,
           }) => {
             element.style.marginLeft = marginLeft;
             element.style.width = width;
@@ -402,6 +382,7 @@ function TableDocument({ document, readOnly }: Props) {
             element.style.touchAction = touchAction;
             element.style.overscrollBehaviorX = overscrollBehaviorX;
             element.style.paddingLeft = paddingLeft;
+            element.style.justifyContent = justifyContent;
           }
         );
         clearTimeout(saveTimer.current);
