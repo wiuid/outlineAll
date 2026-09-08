@@ -62,6 +62,11 @@ const Workspace = styled.div`
   height: 100vh;
   width: 100%;
   overflow: hidden;
+  overscroll-behavior: none;
+
+  @media (max-width: 768px) {
+    height: 100dvh;
+  }
 `;
 
 const Frame = styled.div`
@@ -69,6 +74,11 @@ const Frame = styled.div`
   width: 100%;
   position: relative;
   overflow: hidden;
+  overscroll-behavior: none;
+
+  @media (max-width: 768px) {
+    touch-action: none;
+  }
 
   [class*="footer"],
   [class*="Footer"] {
@@ -174,6 +184,7 @@ function TableDocument({ document, readOnly }: Props) {
       setIsEditingTitle(false);
     } catch (titleError) {
       setError(`标题保存失败：${formatError(titleError)}`);
+      // eslint-disable-next-line no-console
       console.error("[table-page] title save failed", titleError);
     }
   };
@@ -227,6 +238,7 @@ function TableDocument({ document, readOnly }: Props) {
             document.tableData = tableData;
           } catch (saveError) {
             setError(`表格保存失败：${formatError(saveError)}`);
+            // eslint-disable-next-line no-console
             console.error("[table-page] save failed", saveError);
           }
         }, 800);
@@ -241,6 +253,7 @@ function TableDocument({ document, readOnly }: Props) {
       };
     } catch (initializationError) {
       setError(`表格初始化失败：${formatError(initializationError)}`);
+      // eslint-disable-next-line no-console
       console.error("[table-page] initialization failed", initializationError);
     }
     return undefined;
