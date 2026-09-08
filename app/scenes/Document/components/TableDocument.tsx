@@ -2,6 +2,7 @@ import { createUniver } from "@univerjs/presets";
 import { LocaleType } from "@univerjs/core";
 import { UniverSheetsCorePreset } from "@univerjs/preset-sheets-core";
 import zhCN from "@univerjs/preset-sheets-core/locales/zh-CN";
+import { SetScrollRelativeCommand } from "@univerjs/sheets-ui";
 import "@univerjs/preset-sheets-core/lib/index.css";
 import { MenuIcon } from "outline-icons";
 import { observer } from "mobx-react";
@@ -17,6 +18,10 @@ import {
   findRibbonHeaderMenu,
   TABLE_DOCUMENT_MOBILE_MEDIA_QUERY,
 } from "./TableDocumentLayout";
+import {
+  installMobileSheetGestures,
+  MOBILE_SHEET_GESTURE_MEDIA_QUERY,
+} from "./TableDocumentMobileGestures";
 
 function createEmptyWorkbook() {
   return {
@@ -120,6 +125,12 @@ const Frame = styled.div`
       > * {
         flex: 0 0 auto;
       }
+    }
+  }
+
+  @media ${MOBILE_SHEET_GESTURE_MEDIA_QUERY} {
+    canvas {
+      touch-action: none;
     }
   }
 
@@ -327,6 +338,34 @@ function TableDocument({ document, readOnly }: Props) {
         getWorkbookData(document.tableData)
       );
 
+      let isCellEditing = false;
+      const editStartedSubscription = univerAPI.addEvent(
+        univerAPI.Event.SheetEditStarted,
+        () => {
+          isCellEditing = true;
+        }
+      );
+      const editEndedSubscription = univerAPI.addEvent(
+        univerAPI.Event.SheetEditEnded,
+        () => {
+          isCellEditing = false;
+        }
+      );
+      const disposeMobileGestures = installMobileSheetGestures({
+        root: containerElement,
+        isEditing: () => isCellEditing,
+        scrollBy: (offsetX, offsetY) => {
+          // Univer 0.25.1 has no relative-pixel scroll facade. This exported
+          // command is the same stable path used by its wheel controller.
+          void univerAPI.executeCommand(SetScrollRelativeCommand.id, {
+            offsetX,
+            offsetY,
+          });
+        },
+        getZoom: () => workbook.getActiveSheet().getZoom(),
+        setZoom: (zoom) => workbook.getActiveSheet().zoom(zoom),
+      });
+
       let ribbonObserver: MutationObserver | undefined;
       let ribbonFrame = 0;
       const captureRibbonHeaderMenu = () => {
@@ -367,6 +406,9 @@ function TableDocument({ document, readOnly }: Props) {
       });
 
       return () => {
+        disposeMobileGestures();
+        editStartedSubscription.dispose();
+        editEndedSubscription.dispose();
         cancelAnimationFrame(ribbonFrame);
         ribbonObserver?.disconnect();
         setRibbonHeaderMenu(null);
