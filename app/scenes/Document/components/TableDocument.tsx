@@ -3,10 +3,13 @@ import { LocaleType } from "@univerjs/core";
 import { UniverSheetsCorePreset } from "@univerjs/preset-sheets-core";
 import zhCN from "@univerjs/preset-sheets-core/locales/zh-CN";
 import "@univerjs/preset-sheets-core/lib/index.css";
+import { MenuIcon } from "outline-icons";
 import { observer } from "mobx-react";
 import { useEffect, useRef, useState } from "react";
 import styled from "styled-components";
+import Button from "~/components/Button";
 import type Document from "~/models/Document";
+import useStores from "~/hooks/useStores";
 import { client } from "~/utils/ApiClient";
 
 function createEmptyWorkbook() {
@@ -56,6 +59,8 @@ function getWorkbookData(saved: Record<string, unknown> | null) {
   }
   return snapshot;
 }
+
+const MOBILE_HEADER_WIDTH = 156;
 
 const Workspace = styled.div`
   position: relative;
@@ -116,7 +121,7 @@ const Header = styled.div`
     top: 0;
     left: 0;
     z-index: 20;
-    width: 112px;
+    width: ${MOBILE_HEADER_WIDTH}px;
     height: 36px;
     padding: 6px 8px;
     background: var(--theme-bg, #fff);
@@ -124,8 +129,24 @@ const Header = styled.div`
   }
 `;
 
+const MobileMenuButton = styled(Button)`
+  display: none;
+
+  @media (max-width: 768px) {
+    display: inline-flex;
+    flex: 0 0 32px;
+    width: 32px;
+    height: 32px;
+    padding: 0;
+    margin-right: 4px;
+  }
+`;
+
 const Title = styled.button`
   max-width: 100%;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
   padding: 2px 6px;
   border: 0;
   border-radius: 4px;
@@ -169,6 +190,7 @@ function formatError(error: unknown) {
 }
 
 function TableDocument({ document, readOnly }: Props) {
+  const { ui } = useStores();
   const [error, setError] = useState<string | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const saveTimer = useRef<ReturnType<typeof setTimeout>>();
@@ -253,8 +275,8 @@ function TableDocument({ document, readOnly }: Props) {
             marginLeft: toolbar.style.marginLeft,
             width: toolbar.style.width,
           });
-          toolbar.style.marginLeft = "112px";
-          toolbar.style.width = "calc(100% - 112px)";
+          toolbar.style.marginLeft = `${MOBILE_HEADER_WIDTH}px`;
+          toolbar.style.width = `calc(100% - ${MOBILE_HEADER_WIDTH}px)`;
         }
       }
 
@@ -302,6 +324,12 @@ function TableDocument({ document, readOnly }: Props) {
   return (
     <Workspace>
       <Header>
+        <MobileMenuButton
+          aria-label="打开导航栏"
+          icon={<MenuIcon />}
+          neutral
+          onClick={ui.toggleMobileSidebar}
+        />
         {readOnly ? (
           <span title={displayTitle}>{displayTitle}</span>
         ) : isEditingTitle ? (
