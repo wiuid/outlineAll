@@ -60,7 +60,7 @@ function getWorkbookData(saved: Record<string, unknown> | null) {
   return snapshot;
 }
 
-const MOBILE_HEADER_WIDTH = 156;
+const MOBILE_HEADER_WIDTH = 120;
 
 const Workspace = styled.div`
   position: relative;
