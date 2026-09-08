@@ -34,7 +34,16 @@ router.post(
 
     let team: Team | null | undefined;
     if (!env.isCloudHosted) {
-      team = await Team.scope("withAuthenticationProviders").findOne();
+      const matchingUser = await User.scope("withAuthentications").findOne({
+        where: {
+          email: email.toLowerCase(),
+        },
+      });
+      team = matchingUser
+        ? await Team.scope("withAuthenticationProviders").findByPk(
+            matchingUser.teamId
+          )
+        : await Team.scope("withAuthenticationProviders").findOne();
     } else if (domain.custom) {
       team = await Team.scope("withAuthenticationProviders").findOne({
         where: { domain: domain.host.toLowerCase() },
