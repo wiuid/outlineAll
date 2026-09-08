@@ -253,6 +253,7 @@ export function newSiblingDocumentPath(params: {
   collectionId?: string | null;
   parentDocumentId?: string;
   index: number;
+  type?: "table";
 }): string {
   const query: Record<string, string> = {
     index: String(params.index),
@@ -262,6 +263,9 @@ export function newSiblingDocumentPath(params: {
   }
   if (params.collectionId) {
     query.collectionId = params.collectionId;
+  }
+  if (params.type) {
+    query.type = params.type;
   }
 
   return `/doc/new?${queryString.stringify(query)}`;

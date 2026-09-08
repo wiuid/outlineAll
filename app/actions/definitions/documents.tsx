@@ -299,7 +299,7 @@ function canCreateSiblingDocument(
 }
 
 export const createNestedDocument = createInternalLinkAction({
-  name: "文档",
+  name: "内部",
   analyticsName: "New document",
   section: ActiveDocumentSection,
   keywords: "create nested",
@@ -321,7 +321,7 @@ export const createNestedDocument = createInternalLinkAction({
 });
 
 export const createNestedTable = createInternalLinkAction({
-  name: "表格",
+  name: "内部",
   analyticsName: "New table",
   section: ActiveDocumentSection,
   keywords: "create table nested",
@@ -426,6 +426,48 @@ const createDocumentAfter = createInternalLinkAction({
   },
 });
 
+function createTableSiblingAction(position: "before" | "after") {
+  return createInternalLinkAction({
+    name: position === "before" ? "之前" : "之后",
+    analyticsName: `New table ${position}`,
+    section: ActiveDocumentSection,
+    keywords: `create table ${position}`,
+    visible: ({ currentTeamId, activeDocumentId, stores }) => {
+      if (!currentTeamId || !activeDocumentId) {
+        return false;
+      }
+      const document = stores.documents.get(activeDocumentId);
+      if (!document?.collectionId) {
+        return false;
+      }
+      const collection = stores.collections.get(document.collectionId);
+      if (collection?.sort.field === "title") {
+        return false;
+      }
+      return canCreateSiblingDocument(stores, document);
+    },
+    to: ({ activeDocumentId, stores, sidebarContext }) => {
+      const document = activeDocumentId
+        ? stores.documents.get(activeDocumentId)
+        : undefined;
+      if (!document) {
+        return "";
+      }
+      const index = findDocumentSiblingIndex(stores, document);
+      const [pathname, search] = newSiblingDocumentPath({
+        collectionId: document.collectionId,
+        parentDocumentId: document.parentDocumentId,
+        index: position === "before" ? Math.max(0, index) : index + 1,
+        type: "table",
+      }).split("?");
+      return { pathname, search, state: { sidebarContext } };
+    },
+  });
+}
+
+const createTableBefore = createTableSiblingAction("before");
+const createTableAfter = createTableSiblingAction("after");
+
 function isAlphabeticallySorted(
   stores: ActionContext["stores"],
   activeDocumentId: string
@@ -439,7 +481,7 @@ function isAlphabeticallySorted(
 }
 
 export const createNewDocument = createActionWithChildren({
-  name: "新建",
+  name: "新建文档",
   analyticsName: "New document",
   section: ActiveDocumentSection,
   icon: <NewDocumentIcon />,
@@ -456,12 +498,28 @@ export const createNewDocument = createActionWithChildren({
     }
     return !isAlphabeticallySorted(stores, activeDocumentId);
   },
-  children: [
-    createNestedDocument,
-    createNestedTable,
-    createDocumentBefore,
-    createDocumentAfter,
-  ],
+  children: [createDocumentBefore, createDocumentAfter, createNestedDocument],
+});
+
+export const createNewTable = createActionWithChildren({
+  name: "新建表格",
+  analyticsName: "New table",
+  section: ActiveDocumentSection,
+  icon: <NewDocumentIcon />,
+  keywords: "create table",
+  visible: ({ currentTeamId, activeDocumentId, stores }) => {
+    if (!activeDocumentId || !currentTeamId) {
+      return false;
+    }
+    if (!stores.policies.abilities(currentTeamId).createDocument) {
+      return false;
+    }
+    if (stores.documents.get(activeDocumentId)?.isDeleted) {
+      return false;
+    }
+    return !isAlphabeticallySorted(stores, activeDocumentId);
+  },
+  children: [createTableBefore, createTableAfter, createNestedTable],
 });
 
 export const createNewDocumentInAlphabeticalCollection =
@@ -1957,6 +2015,7 @@ export const rootDocumentActions = [
   createDocument,
   createDraftDocument,
   createNewDocument,
+  createNewTable,
   createNewDocumentInAlphabeticalCollection,
   createNestedDocument,
   createNestedTable,
