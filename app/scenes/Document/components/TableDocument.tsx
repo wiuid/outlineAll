@@ -123,7 +123,7 @@ const Header = styled.div`
     z-index: 20;
     width: max-content;
     min-width: ${MOBILE_HEADER_WIDTH}px;
-    max-width: 45vw;
+    max-width: 40vw;
     height: 36px;
     padding: 6px 8px;
     background: transparent;
@@ -166,7 +166,8 @@ const Title = styled.button`
   @media (max-width: 768px) {
     flex: 0 1 auto;
     width: auto;
-    max-width: calc(45vw - 44px);
+    max-width: calc(40vw - 44px);
+    margin-right: 4px;
   }
 
   &:hover {
@@ -189,7 +190,7 @@ const TitleInput = styled.input`
   @media (max-width: 768px) {
     flex: 0 1 auto;
     width: auto;
-    max-width: calc(45vw - 44px);
+    max-width: calc(40vw - 44px);
   }
 `;
 
