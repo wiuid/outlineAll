@@ -299,7 +299,7 @@ function canCreateSiblingDocument(
 }
 
 export const createNestedDocument = createInternalLinkAction({
-  name: ({ t }) => t("Nested document"),
+  name: "文档",
   analyticsName: "New document",
   section: ActiveDocumentSection,
   keywords: "create nested",
@@ -311,6 +311,28 @@ export const createNestedDocument = createInternalLinkAction({
   to: ({ activeDocumentId, sidebarContext }) => {
     const [pathname, search] =
       newNestedDocumentPath(activeDocumentId).split("?");
+
+    return {
+      pathname,
+      search,
+      state: { sidebarContext },
+    };
+  },
+});
+
+export const createNestedTable = createInternalLinkAction({
+  name: "表格",
+  analyticsName: "New table",
+  section: ActiveDocumentSection,
+  keywords: "create table nested",
+  visible: ({ activeDocumentId, stores }) =>
+    !!activeDocumentId &&
+    !!stores.policies.abilities(activeDocumentId).createChildDocument,
+  to: ({ activeDocumentId, sidebarContext }) => {
+    const [pathname, search] = newNestedDocumentPath(
+      activeDocumentId ?? undefined,
+      { type: "table" }
+    ).split("?");
 
     return {
       pathname,
@@ -417,7 +439,7 @@ function isAlphabeticallySorted(
 }
 
 export const createNewDocument = createActionWithChildren({
-  name: ({ t }) => t("New document"),
+  name: "新建",
   analyticsName: "New document",
   section: ActiveDocumentSection,
   icon: <NewDocumentIcon />,
@@ -434,7 +456,12 @@ export const createNewDocument = createActionWithChildren({
     }
     return !isAlphabeticallySorted(stores, activeDocumentId);
   },
-  children: [createDocumentBefore, createDocumentAfter, createNestedDocument],
+  children: [
+    createNestedDocument,
+    createNestedTable,
+    createDocumentBefore,
+    createDocumentAfter,
+  ],
 });
 
 export const createNewDocumentInAlphabeticalCollection =
@@ -1932,6 +1959,7 @@ export const rootDocumentActions = [
   createNewDocument,
   createNewDocumentInAlphabeticalCollection,
   createNestedDocument,
+  createNestedTable,
   createTemplateFromDocument,
   deleteDocument,
   importDocument,

@@ -13,6 +13,8 @@ type Props = Optional<
     | "id"
     | "urlId"
     | "title"
+    | "documentType"
+    | "tableData"
     | "text"
     | "content"
     | "icon"
@@ -149,6 +151,8 @@ export default async function documentCreator(
   ctx: APIContext,
   {
     title,
+    documentType,
+    tableData,
     text,
     icon,
     color,
@@ -235,6 +239,8 @@ export default async function documentCreator(
     icon: icon ?? template?.icon,
     color: color ?? template?.color,
     title: titleWithReplacements,
+    tableData,
+    documentType,
     content: contentWithReplacements,
     state,
   });

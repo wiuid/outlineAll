@@ -323,6 +323,17 @@ class Document extends ArchivableModel<
   @Column(DataType.STRING)
   title: string;
 
+  /** The document page renderer to use. Tables are independent pages, not editor nodes. */
+  @Default("document")
+  @Column(DataType.STRING)
+  documentType: "document" | "table";
+
+  /** Univer workbook snapshot for table pages. */
+  @AllowNull
+  @Column(DataType.JSONB)
+  @SkipChangeset
+  tableData: Record<string, unknown> | null;
+
   @Length({
     max: DocumentValidation.maxSummaryLength,
     msg: `Document summary must be ${DocumentValidation.maxSummaryLength} characters or less`,
@@ -1218,7 +1229,7 @@ class Document extends ArchivableModel<
   publish = async (
     ctx: APIContext,
     {
-      index = 0,
+      index,
       collectionId,
       silent = false,
       event = true,

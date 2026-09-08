@@ -76,6 +76,13 @@ export default class Document extends ArchivableModel implements Searchable {
   @observable.shallow
   data: ProsemirrorData;
 
+  /** Independent table page renderer and Univer workbook snapshot. */
+  @Field
+  documentType: "document" | "table" = "document";
+
+  @Field
+  tableData: Record<string, unknown> | null = null;
+
   /**
    * The original data source of the document, if imported.
    */

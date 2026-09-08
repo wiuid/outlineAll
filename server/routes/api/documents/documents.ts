@@ -1807,6 +1807,8 @@ router.post(
     const {
       id,
       title,
+      documentType,
+      tableData,
       text,
       icon,
       color,
@@ -1845,6 +1847,8 @@ router.post(
     const document = await documentCreator(ctx, {
       id,
       title,
+      documentType,
+      tableData,
       text: processedText
         ? await TextHelper.replaceImagesWithAttachments(
             ctx,

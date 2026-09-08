@@ -1,13 +1,16 @@
 import { observer } from "mobx-react";
 import { EditIcon, PlusIcon } from "outline-icons";
 import { useTranslation } from "react-i18next";
-import { Link } from "react-router-dom";
 import type Collection from "~/models/Collection";
 import { Action } from "~/components/Actions";
 import Button from "~/components/Button";
+import { DropdownMenu } from "~/components/Menu/DropdownMenu";
 import Tooltip from "~/components/Tooltip";
 import usePolicy from "~/hooks/usePolicy";
 import CollectionMenu from "~/menus/CollectionMenu";
+import { createInternalLinkAction } from "~/actions";
+import { ActiveDocumentSection } from "~/actions/sections";
+import { useMenuAction } from "~/hooks/useMenuAction";
 import {
   collectionEditPath,
   collectionPath,
@@ -19,7 +22,7 @@ import { CollectionTab } from "./Navigation";
 import lazyWithRetry from "~/utils/lazyWithRetry";
 import history from "~/utils/history";
 import RegisterKeyDown from "~/components/RegisterKeyDown";
-import { useCallback } from "react";
+import { useCallback, useMemo } from "react";
 
 const ShareButton = lazyWithRetry(() => import("./ShareButton"));
 
@@ -51,6 +54,25 @@ function Actions({ collection, isEditing, sidebarContext }: Props) {
     });
   }, [collection, sidebarContext]);
 
+  const newDocumentActions = useMemo(
+    () => [
+      createInternalLinkAction({
+        name: "文档",
+        section: ActiveDocumentSection,
+        visible: can.createDocument,
+        to: newDocumentPath(collection.id),
+      }),
+      createInternalLinkAction({
+        name: "表格",
+        section: ActiveDocumentSection,
+        visible: can.createDocument,
+        to: newDocumentPath(collection.id, { type: "table" }),
+      }),
+    ],
+    [can.createDocument, collection.id]
+  );
+  const newDocumentAction = useMenuAction(newDocumentActions);
+
   return (
     <>
       {(!isEditing || !user?.separateEditMode) && (
@@ -80,16 +102,16 @@ function Actions({ collection, isEditing, sidebarContext }: Props) {
       )}
       {can.createDocument && (
         <Action>
-          <Tooltip content={t("New document")} shortcut="n" placement="bottom">
-            <Button
-              as={Link}
-              to={collection ? newDocumentPath(collection.id) : ""}
-              disabled={!collection}
-              icon={<PlusIcon />}
-              neutral={isEditing}
+          <Tooltip content="新建" shortcut="n" placement="bottom">
+            <DropdownMenu
+              action={newDocumentAction}
+              align="end"
+              ariaLabel="新建"
             >
-              {t("New doc")}
-            </Button>
+              <Button icon={<PlusIcon />} neutral={isEditing}>
+                新建
+              </Button>
+            </DropdownMenu>
           </Tooltip>
         </Action>
       )}

@@ -1,11 +1,9 @@
 import { observer } from "mobx-react";
 import * as React from "react";
-import { useTranslation, Trans } from "react-i18next";
 import type Document from "~/models/Document";
 import { DropdownMenu } from "~/components/Menu/DropdownMenu";
 import usePolicy from "~/hooks/usePolicy";
-import useStores from "~/hooks/useStores";
-import { newDocumentPath, newNestedDocumentPath } from "~/utils/routeHelpers";
+import { newDocumentPath } from "~/utils/routeHelpers";
 import { createInternalLinkAction } from "~/actions";
 import { ActiveDocumentSection } from "~/actions/sections";
 import { useMenuAction } from "~/hooks/useMenuAction";
@@ -18,55 +16,25 @@ type Props = {
 };
 
 function NewChildDocumentMenu({ document }: Props) {
-  const { t } = useTranslation();
   const canCollection = usePolicy(document.collectionId);
-  const { collections } = useStores();
-
-  const collection = document.collectionId
-    ? collections.get(document.collectionId)
-    : undefined;
-  const collectionName = collection ? collection.name : t("collection");
 
   const actions = React.useMemo(
     () => [
       createInternalLinkAction({
-        name: (
-          <Trans
-            defaults="New document in <em>{{ collectionName }}</em>"
-            values={{
-              collectionName,
-            }}
-            components={{
-              em: <strong />,
-            }}
-          />
-        ),
+        name: "文档",
         section: ActiveDocumentSection,
         visible: !!canCollection.createDocument,
         to: newDocumentPath(document.collectionId),
       }),
       createInternalLinkAction({
-        name: (
-          <Trans
-            defaults="New document in <em>{{ collectionName }}</em>"
-            values={{
-              collectionName: document.titleWithDefault,
-            }}
-            components={{
-              em: <strong />,
-            }}
-          />
-        ),
+        name: "表格",
         section: ActiveDocumentSection,
-        visible: true,
-        to: newNestedDocumentPath(document.id),
+        visible: !!canCollection.createDocument,
+        to: newDocumentPath(document.collectionId, { type: "table" }),
       }),
     ],
     [
-      collectionName,
       canCollection.createDocument,
-      document.id,
-      document.titleWithDefault,
       document.collectionId,
     ]
   );
@@ -74,14 +42,14 @@ function NewChildDocumentMenu({ document }: Props) {
   const rootAction = useMenuAction(actions);
 
   return (
-    <Tooltip content={t("New document")} shortcut="n" placement="bottom">
+    <Tooltip content="新建" shortcut="n" placement="bottom">
       <DropdownMenu
         action={rootAction}
         align="end"
-        ariaLabel={t("New child document")}
+        ariaLabel="新建"
       >
         <Button icon={<PlusIcon />} neutral>
-          {t("New doc")}
+          新建
         </Button>
       </DropdownMenu>
     </Tooltip>

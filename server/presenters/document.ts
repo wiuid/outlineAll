@@ -60,6 +60,8 @@ async function presentDocument(
     url: document.path,
     urlId: document.urlId,
     title: document.title,
+    documentType: document.documentType,
+    tableData: document.tableData,
     data:
       options?.includeData === false
         ? undefined

@@ -383,6 +383,12 @@ export const DocumentsUpdateSchema = BaseSchema.extend({
     /** Doc title to be updated */
     title: z.string().optional(),
 
+    /** Independent page renderer. */
+    documentType: z.enum(["document", "table"]).optional(),
+
+    /** Univer workbook snapshot for table pages. */
+    tableData: z.record(z.string(), z.unknown()).nullish(),
+
     /** Doc text to be updated */
     text: z.string().max(DocumentValidation.maxLength).optional(),
 
@@ -557,6 +563,12 @@ export const DocumentsCreateSchema = BaseSchema.extend({
 
     /** Document title */
     title: z.string().optional(),
+
+    /** Independent page renderer. */
+    documentType: z.enum(["document", "table"]).optional(),
+
+    /** Univer workbook snapshot for table pages. */
+    tableData: z.record(z.string(), z.unknown()).nullish(),
 
     /** Document text */
     text: z.string().max(DocumentValidation.maxLength).optional(),

@@ -16,6 +16,10 @@ type Props = {
   color?: string | null;
   /** The new text content */
   text?: string;
+  /** The document page renderer. */
+  documentType?: "document" | "table";
+  /** Univer workbook snapshot for table pages. */
+  tableData?: Record<string, unknown> | null;
   /** Whether the editing session is complete */
   done?: boolean;
   /** The version of the client editor that was used */
@@ -54,6 +58,8 @@ export default async function documentUpdater(
     title,
     icon,
     color,
+    documentType,
+    tableData,
     text,
     editorVersion,
     templateId,
@@ -80,6 +86,12 @@ export default async function documentUpdater(
   }
   if (color !== undefined) {
     document.color = color;
+  }
+  if (documentType !== undefined) {
+    document.documentType = documentType;
+  }
+  if (tableData !== undefined) {
+    document.tableData = tableData;
   }
   if (editorVersion) {
     document.editorVersion = editorVersion;

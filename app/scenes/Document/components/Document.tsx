@@ -39,6 +39,7 @@ import Notices from "./Notices";
 import References from "./References";
 import RevisionViewer from "./RevisionViewer";
 import SharedHeader from "./SharedHeader";
+import TableDocument from "./TableDocument";
 
 type LocationState = {
   title?: string;
@@ -71,7 +72,7 @@ interface Props {
 }
 
 /** Scene component responsible for rendering and interacting with a document. */
-function DocumentScene({
+function RichDocumentScene({
   document,
   revision,
   readOnly,
@@ -579,5 +580,16 @@ const ReferencesWrapper = styled.div`
     display: none;
   }
 `;
+
+function DocumentScene(props: Props) {
+  if (
+    (props.document.documentType === "table" ||
+      props.document.tableData !== null) &&
+    !props.revision
+  ) {
+    return <TableDocument document={props.document} readOnly={props.readOnly} />;
+  }
+  return <RichDocumentScene {...props} />;
+}
 
 export default observer(DocumentScene);

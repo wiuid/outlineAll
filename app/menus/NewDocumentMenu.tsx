@@ -1,34 +1,59 @@
 import { observer } from "mobx-react";
 import { PlusIcon } from "outline-icons";
-import { useTranslation } from "react-i18next";
-import { Link } from "react-router-dom";
+import { useMemo } from "react";
 import Button from "~/components/Button";
+import { DropdownMenu } from "~/components/Menu/DropdownMenu";
 import Tooltip from "~/components/Tooltip";
+import { createInternalLinkAction } from "~/actions";
+import { ActiveDocumentSection } from "~/actions/sections";
 import useCurrentTeam from "~/hooks/useCurrentTeam";
+import { useMenuAction } from "~/hooks/useMenuAction";
 import usePolicy from "~/hooks/usePolicy";
 import { preloadEditor } from "~/routes/scenes";
 import { newDocumentPath } from "~/utils/routeHelpers";
 
 function NewDocumentMenu() {
-  const { t } = useTranslation();
   const team = useCurrentTeam();
   const can = usePolicy(team);
+
+  const actions = useMemo(
+    () => [
+      createInternalLinkAction({
+        name: "文档",
+        section: ActiveDocumentSection,
+        visible: !!can.createDocument,
+        to: newDocumentPath(),
+      }),
+      createInternalLinkAction({
+        name: "表格",
+        section: ActiveDocumentSection,
+        visible: !!can.createDocument,
+        to: newDocumentPath(undefined, { type: "table" }),
+      }),
+    ],
+    [can.createDocument]
+  );
+  const rootAction = useMenuAction(actions);
 
   if (!can.createDocument) {
     return null;
   }
 
   return (
-    <Tooltip content={t("New document")} shortcut="n" placement="bottom">
-      <Button
-        as={Link}
-        to={newDocumentPath()}
-        icon={<PlusIcon />}
-        onPointerEnter={preloadEditor}
-        onFocus={preloadEditor}
+    <Tooltip content="新建" shortcut="n" placement="bottom">
+      <DropdownMenu
+        action={rootAction}
+        align="end"
+        ariaLabel="新建"
       >
-        {t("New doc")}
-      </Button>
+        <Button
+          icon={<PlusIcon />}
+          onPointerEnter={preloadEditor}
+          onFocus={preloadEditor}
+        >
+          新建
+        </Button>
+      </DropdownMenu>
     </Tooltip>
   );
 }

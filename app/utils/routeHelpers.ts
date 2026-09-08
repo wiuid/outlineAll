@@ -215,6 +215,7 @@ export function newDocumentPath(
   collectionId?: string | null,
   params: {
     templateId?: string;
+    type?: "table";
   } = {}
 ): string {
   const search = queryString.stringify(params);
@@ -230,9 +231,12 @@ export function newDocumentPath(
  * @param parentDocumentId an optional parent document to nest under.
  * @returns the path to the new nested document screen.
  */
-export function newNestedDocumentPath(parentDocumentId?: string): string {
+export function newNestedDocumentPath(
+  parentDocumentId?: string,
+  params: { type?: "table" } = {}
+): string {
   const search = parentDocumentId
-    ? `?${queryString.stringify({ parentDocumentId })}`
+    ? `?${queryString.stringify({ parentDocumentId, ...params })}`
     : "";
 
   return `/doc/new${search}`;

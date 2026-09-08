@@ -30,7 +30,9 @@ function DocumentNew() {
     preloadEditor();
 
     async function createDocument() {
-      const index = parseInt(query.get("index") || "0", 10);
+      const indexParam = query.get("index");
+      const index = indexParam === null ? undefined : parseInt(indexParam, 10);
+      const isTable = query.get("type") === "table";
       const parentDocumentId = query.get("parentDocumentId") ?? undefined;
       const parentDocument = parentDocumentId
         ? documents.get(parentDocumentId)
@@ -51,6 +53,7 @@ function DocumentNew() {
               user.getPreference(UserPreference.FullWidthDocuments),
             templateId: query.get("templateId") ?? undefined,
             title: query.get("title") ?? "",
+            documentType: isTable ? "table" : "document",
             data: ProsemirrorDataHelper.getEmpty(),
           },
           {
