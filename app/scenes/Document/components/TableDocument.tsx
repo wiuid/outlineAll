@@ -262,6 +262,10 @@ function TableDocument({ document, readOnly }: Props) {
         element: HTMLElement;
         marginLeft: string;
         width: string;
+        overflowX: string;
+        overflowY: string;
+        touchAction: string;
+        overscrollBehaviorX: string;
       }> = [];
       let toolbarObserver: MutationObserver | undefined;
       let toolbarFrame = 0;
@@ -285,9 +289,17 @@ function TableDocument({ document, readOnly }: Props) {
           element: toolbar,
           marginLeft: toolbar.style.marginLeft,
           width: toolbar.style.width,
+          overflowX: toolbar.style.overflowX,
+          overflowY: toolbar.style.overflowY,
+          touchAction: toolbar.style.touchAction,
+          overscrollBehaviorX: toolbar.style.overscrollBehaviorX,
         });
         toolbar.style.marginLeft = `${MOBILE_HEADER_WIDTH}px`;
         toolbar.style.width = `calc(100% - ${MOBILE_HEADER_WIDTH}px)`;
+        toolbar.style.overflowX = "auto";
+        toolbar.style.overflowY = "hidden";
+        toolbar.style.touchAction = "pan-x";
+        toolbar.style.overscrollBehaviorX = "contain";
         toolbarObserver?.disconnect();
       };
       if (window.matchMedia("(max-width: 768px)").matches) {
@@ -324,10 +336,24 @@ function TableDocument({ document, readOnly }: Props) {
       return () => {
         cancelAnimationFrame(toolbarFrame);
         toolbarObserver?.disconnect();
-        mobileToolbarAdjustments.forEach(({ element, marginLeft, width }) => {
-          element.style.marginLeft = marginLeft;
-          element.style.width = width;
-        });
+        mobileToolbarAdjustments.forEach(
+          ({
+            element,
+            marginLeft,
+            width,
+            overflowX,
+            overflowY,
+            touchAction,
+            overscrollBehaviorX,
+          }) => {
+            element.style.marginLeft = marginLeft;
+            element.style.width = width;
+            element.style.overflowX = overflowX;
+            element.style.overflowY = overflowY;
+            element.style.touchAction = touchAction;
+            element.style.overscrollBehaviorX = overscrollBehaviorX;
+          }
+        );
         clearTimeout(saveTimer.current);
         disposeTimer.current = setTimeout(() => {
           subscription?.dispose?.();
