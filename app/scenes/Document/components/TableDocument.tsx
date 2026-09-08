@@ -266,6 +266,8 @@ function TableDocument({ document, readOnly }: Props) {
         overflowY: string;
         touchAction: string;
         overscrollBehaviorX: string;
+        paddingLeft: string;
+        boxSizing: string;
       }> = [];
       let toolbarObserver: MutationObserver | undefined;
       let toolbarFrame = 0;
@@ -278,10 +280,13 @@ function TableDocument({ document, readOnly }: Props) {
         }
         const toolbar = Array.from(
           containerElement.querySelectorAll<HTMLElement>("[class*='toolbar']")
-        ).find((element) => {
-          const rect = element.getBoundingClientRect();
-          return rect.top < 48 && rect.height >= 24 && rect.height <= 64 && rect.width > 160;
-        });
+        )
+          .map((element) => ({ element, rect: element.getBoundingClientRect() }))
+          .filter(
+            ({ rect }) =>
+              rect.top < 48 && rect.height >= 24 && rect.height <= 64 && rect.width > 160
+          )
+          .sort((a, b) => b.rect.width - a.rect.width)[0]?.element;
         if (!toolbar) {
           return;
         }
@@ -293,9 +298,13 @@ function TableDocument({ document, readOnly }: Props) {
           overflowY: toolbar.style.overflowY,
           touchAction: toolbar.style.touchAction,
           overscrollBehaviorX: toolbar.style.overscrollBehaviorX,
+          paddingLeft: toolbar.style.paddingLeft,
+          boxSizing: toolbar.style.boxSizing,
         });
-        toolbar.style.marginLeft = `${MOBILE_HEADER_WIDTH}px`;
-        toolbar.style.width = `calc(100% - ${MOBILE_HEADER_WIDTH}px)`;
+        toolbar.style.marginLeft = "0";
+        toolbar.style.width = "100%";
+        toolbar.style.paddingLeft = `${MOBILE_HEADER_WIDTH}px`;
+        toolbar.style.boxSizing = "border-box";
         toolbar.style.overflowX = "auto";
         toolbar.style.overflowY = "hidden";
         toolbar.style.touchAction = "pan-x";
@@ -345,6 +354,8 @@ function TableDocument({ document, readOnly }: Props) {
             overflowY,
             touchAction,
             overscrollBehaviorX,
+            paddingLeft,
+            boxSizing,
           }) => {
             element.style.marginLeft = marginLeft;
             element.style.width = width;
@@ -352,6 +363,8 @@ function TableDocument({ document, readOnly }: Props) {
             element.style.overflowY = overflowY;
             element.style.touchAction = touchAction;
             element.style.overscrollBehaviorX = overscrollBehaviorX;
+            element.style.paddingLeft = paddingLeft;
+            element.style.boxSizing = boxSizing;
           }
         );
         clearTimeout(saveTimer.current);
