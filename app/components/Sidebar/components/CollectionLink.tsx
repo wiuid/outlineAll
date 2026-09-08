@@ -75,11 +75,12 @@ const CollectionLink: React.FC<Props> = ({
   }, []);
 
   const handleNewDoc = React.useCallback(
-    async (input: string) => {
+    async (input: string, documentType?: "table") => {
       const newDocument = await documents.create(
         {
           collectionId: collection.id,
           title: input,
+          documentType,
           fullWidth: user.getPreference(UserPreference.FullWidthDocuments),
           data: ProsemirrorDataHelper.getEmpty(),
         },

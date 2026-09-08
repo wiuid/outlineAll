@@ -365,7 +365,7 @@ const DocumentLinkInner = observer(function DocumentLinkInner({
   const title = document?.title || node.title || t("Untitled");
 
   const handleNewDoc = React.useCallback(
-    async (input: string) => {
+    async (input: string, documentType?: "table") => {
       const newDocument = await documents.create(
         {
           collectionId: collection?.id,
@@ -374,6 +374,7 @@ const DocumentLinkInner = observer(function DocumentLinkInner({
             document?.fullWidth ??
             user.getPreference(UserPreference.FullWidthDocuments),
           title: input,
+          documentType,
           data: ProsemirrorDataHelper.getEmpty(),
         },
         { publish: true }

@@ -71,7 +71,7 @@ export type CollectionRowProps = {
   /** When true, the "+" new-child button is rendered in the menu slot. */
   canCreateChild?: boolean;
   /** Submit handler for the inline new-child title input. */
-  onCreateChild?: (title: string) => Promise<void>;
+  onCreateChild?: (title: string, documentType?: "table") => Promise<void>;
   /** Depth of the inline new-child SidebarLink. Defaults to one level below the row. */
   newChildDepth?: number;
 
@@ -125,12 +125,14 @@ function CollectionRow({
   );
   const [isAddingNewChild, setIsAddingNewChild, closeAddingNewChild] =
     useBoolean();
+  const [newChildType, setNewChildType] = React.useState<"document" | "table" | null>(null);
   const newChildTitleRef = React.useRef<RefHandle>(null);
 
   const handleAddChild = React.useCallback(
     (ev: React.MouseEvent<HTMLButtonElement>) => {
       ev.preventDefault();
       setIsAddingNewChild();
+      setNewChildType(null);
       onExpand?.();
     },
     [setIsAddingNewChild, onExpand]
@@ -143,13 +145,13 @@ function CollectionRow({
       }
       try {
         newChildTitleRef.current?.setIsEditing(false);
-        await onCreateChild(value);
+        await onCreateChild(value, newChildType === "table" ? "table" : undefined);
         closeAddingNewChild();
       } catch (_err) {
         newChildTitleRef.current?.setIsEditing(true);
       }
     },
-    [onCreateChild, closeAddingNewChild]
+    [onCreateChild, closeAddingNewChild, newChildType]
   );
 
   const defaultIsActive = React.useCallback(
@@ -241,16 +243,37 @@ function CollectionRow({
           depth={newChildDepth ?? Math.max(depth + 1, 2)}
           ellipsis={false}
           label={
-            <EditableTitle
-              title=""
-              canUpdate
-              isEditing
-              placeholder={`${t("New doc")}…`}
-              onCancel={closeAddingNewChild}
-              onSubmit={handleNewChildSubmit}
-              maxLength={DocumentValidation.maxTitleLength}
-              ref={newChildTitleRef}
-            />
+            newChildType ? (
+              <EditableTitle
+                title=""
+                canUpdate
+                isEditing
+                placeholder={`${t("New doc")}…`}
+                onCancel={closeAddingNewChild}
+                onSubmit={handleNewChildSubmit}
+                maxLength={DocumentValidation.maxTitleLength}
+                ref={newChildTitleRef}
+              />
+            ) : (
+              <div style={{ display: "flex", gap: 8, padding: "4px 8px" }}>
+                <span
+                  role="button"
+                  tabIndex={0}
+                  onClick={() => setNewChildType("document")}
+                  onKeyDown={(event) => event.key === "Enter" && setNewChildType("document")}
+                >
+                  文档
+                </span>
+                <span
+                  role="button"
+                  tabIndex={0}
+                  onClick={() => setNewChildType("table")}
+                  onKeyDown={(event) => event.key === "Enter" && setNewChildType("table")}
+                >
+                  表格
+                </span>
+              </div>
+            )
           }
         />
       )}
