@@ -3,11 +3,16 @@ import { LocaleType } from "@univerjs/core";
 import { UniverSheetsCorePreset } from "@univerjs/preset-sheets-core";
 import zhCN from "@univerjs/preset-sheets-core/locales/zh-CN";
 import "@univerjs/preset-sheets-core/lib/index.css";
+import { UniverSheetsMobileUIPlugin } from "@univerjs/sheets-ui";
 import { observer } from "mobx-react";
 import { useEffect, useRef, useState } from "react";
 import styled from "styled-components";
 import type Document from "~/models/Document";
 import { client } from "~/utils/ApiClient";
+import {
+  shouldUseMobileSheetsUI,
+  withMobileSheetsUI,
+} from "./mobileTablePreset";
 
 function createEmptyWorkbook() {
   return {
@@ -201,21 +206,27 @@ function TableDocument({ document, readOnly }: Props) {
     clearTimeout(disposeTimer.current);
 
     try {
+      const sheetsPreset = UniverSheetsCorePreset({
+        container: containerRef.current,
+        toolbar: !readOnly,
+        formulaBar: !readOnly,
+        footer: {
+          sheetBar: true,
+          statisticBar: false,
+          menus: false,
+          zoomSlider: true,
+        },
+      });
+      const useMobileUI = shouldUseMobileSheetsUI({
+        coarsePointer: window.matchMedia("(pointer: coarse)").matches,
+      });
       const { univer, univerAPI } = createUniver({
         locale: LocaleType.ZH_CN,
         locales: { [LocaleType.ZH_CN]: zhCN },
         presets: [
-          UniverSheetsCorePreset({
-            container: containerRef.current,
-            toolbar: !readOnly,
-            formulaBar: !readOnly,
-            footer: {
-              sheetBar: true,
-              statisticBar: false,
-              menus: false,
-              zoomSlider: true,
-            },
-          }),
+          useMobileUI
+            ? withMobileSheetsUI(sheetsPreset, UniverSheetsMobileUIPlugin)
+            : sheetsPreset,
         ],
       });
       const workbook = univerAPI.createWorkbook(
