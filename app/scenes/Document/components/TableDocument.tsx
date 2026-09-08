@@ -66,8 +66,7 @@ const Workspace = styled.div`
 
   @media (max-width: 768px) {
     height: 100dvh;
-    display: flex;
-    flex-direction: column;
+    display: block;
   }
 `;
 
@@ -79,9 +78,9 @@ const Frame = styled.div`
   overscroll-behavior: none;
 
   @media (max-width: 768px) {
-    flex: 1 1 auto;
+    flex: none;
     min-height: 0;
-    height: auto;
+    height: 100%;
   }
 
   [class*="footer"],
@@ -113,14 +112,13 @@ const Header = styled.div`
   overflow: hidden;
   text-overflow: ellipsis;
   @media (max-width: 768px) {
-    position: relative;
-    top: auto;
-    left: auto;
+    position: absolute;
+    top: 0;
+    left: 0;
     z-index: 20;
-    width: 100%;
+    width: 112px;
     height: 36px;
-    flex: 0 0 36px;
-    padding: 6px 12px;
+    padding: 6px 8px;
     background: var(--theme-bg, #fff);
     border-bottom: 1px solid rgba(0, 0, 0, 0.08);
   }
@@ -237,6 +235,29 @@ function TableDocument({ document, readOnly }: Props) {
         getWorkbookData(document.tableData)
       );
 
+      const mobileToolbarAdjustments: Array<{
+        element: HTMLElement;
+        marginLeft: string;
+        width: string;
+      }> = [];
+      if (window.matchMedia("(max-width: 768px)").matches) {
+        const toolbar = Array.from(
+          containerRef.current.querySelectorAll<HTMLElement>("[class*='toolbar']")
+        ).find((element) => {
+          const rect = element.getBoundingClientRect();
+          return rect.top < 48 && rect.height >= 24 && rect.height <= 64 && rect.width > 160;
+        });
+        if (toolbar) {
+          mobileToolbarAdjustments.push({
+            element: toolbar,
+            marginLeft: toolbar.style.marginLeft,
+            width: toolbar.style.width,
+          });
+          toolbar.style.marginLeft = "112px";
+          toolbar.style.width = "calc(100% - 112px)";
+        }
+      }
+
       const subscription = workbook.onCommandExecuted(() => {
         if (readOnly) {
           return;
@@ -260,6 +281,10 @@ function TableDocument({ document, readOnly }: Props) {
       });
 
       return () => {
+        mobileToolbarAdjustments.forEach(({ element, marginLeft, width }) => {
+          element.style.marginLeft = marginLeft;
+          element.style.width = width;
+        });
         clearTimeout(saveTimer.current);
         disposeTimer.current = setTimeout(() => {
           subscription?.dispose?.();
