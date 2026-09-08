@@ -6,11 +6,17 @@ import "@univerjs/preset-sheets-core/lib/index.css";
 import { MenuIcon } from "outline-icons";
 import { observer } from "mobx-react";
 import { useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import styled from "styled-components";
 import Button from "~/components/Button";
 import type Document from "~/models/Document";
+import useMediaQuery from "~/hooks/useMediaQuery";
 import useStores from "~/hooks/useStores";
 import { client } from "~/utils/ApiClient";
+import {
+  findRibbonHeaderMenu,
+  TABLE_DOCUMENT_MOBILE_MEDIA_QUERY,
+} from "./TableDocumentLayout";
 
 function createEmptyWorkbook() {
   return {
@@ -49,7 +55,10 @@ function getWorkbookData(saved: Record<string, unknown> | null) {
 
   const snapshot = createEmptyWorkbook() as {
     sheetOrder: string[];
-    sheets: Record<string, { name: string; scrollTop: number; scrollLeft: number }>;
+    sheets: Record<
+      string,
+      { name: string; scrollTop: number; scrollLeft: number }
+    >;
   };
   const firstSheetId = snapshot.sheetOrder[0];
   if (firstSheetId && snapshot.sheets[firstSheetId]) {
@@ -60,8 +69,6 @@ function getWorkbookData(saved: Record<string, unknown> | null) {
   return snapshot;
 }
 
-const MOBILE_HEADER_WIDTH = 120;
-
 const Workspace = styled.div`
   position: relative;
   height: 100vh;
@@ -69,7 +76,7 @@ const Workspace = styled.div`
   overflow: hidden;
   overscroll-behavior: none;
 
-  @media (max-width: 768px) {
+  @media ${TABLE_DOCUMENT_MOBILE_MEDIA_QUERY} {
     height: 100dvh;
     display: block;
   }
@@ -82,10 +89,38 @@ const Frame = styled.div`
   overflow: hidden;
   overscroll-behavior: none;
 
-  @media (max-width: 768px) {
+  @media ${TABLE_DOCUMENT_MOBILE_MEDIA_QUERY} {
     flex: none;
     min-height: 0;
     height: 100%;
+
+    [data-u-comp="ribbon-header-menu"] {
+      display: flex;
+      align-items: center;
+      min-width: 0;
+    }
+
+    [data-u-comp="ribbon-header-menu"] > [role="tablist"] {
+      flex: 1 1 auto;
+      width: auto;
+      min-width: 0;
+      box-sizing: border-box;
+      justify-content: flex-start;
+      overflow-x: auto;
+      overflow-y: hidden;
+      padding-left: 0;
+      touch-action: pan-x;
+      overscroll-behavior-x: contain;
+      scrollbar-width: none;
+
+      &::-webkit-scrollbar {
+        display: none;
+      }
+
+      > * {
+        flex: 0 0 auto;
+      }
+    }
   }
 
   [class*="footer"],
@@ -99,7 +134,7 @@ const Frame = styled.div`
   }
 `;
 
-const Header = styled.div`
+const Header = styled.div<{ $inMobileRibbon: boolean }>`
   position: absolute;
   z-index: 20;
   top: 0;
@@ -116,19 +151,20 @@ const Header = styled.div`
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-  @media (max-width: 768px) {
-    position: absolute;
-    top: 0;
-    left: 0;
+  @media ${TABLE_DOCUMENT_MOBILE_MEDIA_QUERY} {
+    position: ${(props) => (props.$inMobileRibbon ? "static" : "absolute")};
+    top: ${(props) => (props.$inMobileRibbon ? "auto" : "0")};
+    left: ${(props) => (props.$inMobileRibbon ? "auto" : "0")};
     z-index: 20;
-    width: max-content;
-    min-width: ${MOBILE_HEADER_WIDTH}px;
-    max-width: 40vw;
+    flex: 0 0 40%;
+    order: -1;
+    width: 40%;
+    min-width: 0;
+    max-width: 160px;
     height: 36px;
-    padding: 6px 8px;
+    padding: 2px 4px;
     background: transparent;
-    border-bottom: 1px solid rgba(0, 0, 0, 0.08);
-    pointer-events: none;
+    pointer-events: auto;
   }
 `;
 
@@ -136,7 +172,7 @@ const MobileMenuButton = styled(Button)`
   pointer-events: auto;
   display: none;
 
-  @media (max-width: 768px) {
+  @media ${TABLE_DOCUMENT_MOBILE_MEDIA_QUERY} {
     display: inline-flex;
     flex: 0 0 32px;
     width: 32px;
@@ -163,16 +199,21 @@ const Title = styled.button`
   text-align: left;
   cursor: pointer;
 
-  @media (max-width: 768px) {
-    flex: 0 1 auto;
-    width: auto;
-    max-width: calc(40vw - 44px);
-    margin-right: 4px;
+  @media ${TABLE_DOCUMENT_MOBILE_MEDIA_QUERY} {
+    flex: 1 1 auto;
+    width: 0;
+    max-width: none;
   }
 
   &:hover {
     background: rgba(0, 0, 0, 0.06);
   }
+`;
+
+const ReadOnlyTitle = styled.span`
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
 `;
 
 const TitleInput = styled.input`
@@ -187,10 +228,10 @@ const TitleInput = styled.input`
   background: transparent;
   color: inherit;
   font: inherit;
-  @media (max-width: 768px) {
-    flex: 0 1 auto;
-    width: auto;
-    max-width: calc(40vw - 44px);
+  @media ${TABLE_DOCUMENT_MOBILE_MEDIA_QUERY} {
+    flex: 1 1 auto;
+    width: 0;
+    max-width: none;
   }
 `;
 
@@ -207,17 +248,23 @@ const ErrorPanel = styled.pre`
 type Props = { document: Document; readOnly: boolean };
 
 function formatError(error: unknown) {
-  return error instanceof Error ? `${error.name}: ${error.message}` : String(error);
+  return error instanceof Error
+    ? `${error.name}: ${error.message}`
+    : String(error);
 }
 
 function TableDocument({ document, readOnly }: Props) {
   const { ui } = useStores();
+  const isMobile = useMediaQuery(TABLE_DOCUMENT_MOBILE_MEDIA_QUERY);
   const [error, setError] = useState<string | null>(null);
+  const [ribbonHeaderMenu, setRibbonHeaderMenu] = useState<HTMLElement | null>(
+    null
+  );
   const containerRef = useRef<HTMLDivElement>(null);
   const saveTimer = useRef<ReturnType<typeof setTimeout>>();
   const disposeTimer = useRef<ReturnType<typeof setTimeout>>();
   const titleInputRef = useRef<HTMLInputElement>(null);
-  const headerRef = useRef<HTMLDivElement>(null);
+
   const [isEditingTitle, setIsEditingTitle] = useState(false);
   const [draftTitle, setDraftTitle] = useState(document.title);
   const displayTitle = document.title || "无标题";
@@ -280,63 +327,22 @@ function TableDocument({ document, readOnly }: Props) {
         getWorkbookData(document.tableData)
       );
 
-      const mobileToolbarAdjustments: Array<{
-        element: HTMLElement;
-        marginLeft: string;
-        width: string;
-        overflowX: string;
-        overflowY: string;
-        touchAction: string;
-        overscrollBehaviorX: string;
-        paddingLeft: string;
-        justifyContent: string;
-      }> = [];
-      let toolbarObserver: MutationObserver | undefined;
-      let toolbarFrame = 0;
-      const applyMobileToolbarOffset = () => {
-        if (
-          !window.matchMedia("(max-width: 768px)").matches ||
-          mobileToolbarAdjustments.length
-        ) {
+      let ribbonObserver: MutationObserver | undefined;
+      let ribbonFrame = 0;
+      const captureRibbonHeaderMenu = () => {
+        const ribbonHeader = findRibbonHeaderMenu(containerElement);
+        if (!ribbonHeader) {
           return;
         }
-        const toolbar = containerElement.querySelector<HTMLElement>(
-          '[data-u-comp="ribbon-header-menu"] > [role="tablist"]'
-        );
-        if (!toolbar) {
-          return;
-        }
-        mobileToolbarAdjustments.push({
-          element: toolbar,
-          marginLeft: toolbar.style.marginLeft,
-          width: toolbar.style.width,
-          overflowX: toolbar.style.overflowX,
-          overflowY: toolbar.style.overflowY,
-          touchAction: toolbar.style.touchAction,
-          overscrollBehaviorX: toolbar.style.overscrollBehaviorX,
-          paddingLeft: toolbar.style.paddingLeft,
-          justifyContent: toolbar.style.justifyContent,
-        });
-        const headerWidth =
-          headerRef.current?.getBoundingClientRect().width ?? MOBILE_HEADER_WIDTH;
-        toolbar.style.marginLeft = "0";
-        toolbar.style.width = "100%";
-        toolbar.style.paddingLeft = `${headerWidth}px`;
-        toolbar.style.justifyContent = "flex-start";
-        toolbar.style.overflowX = "auto";
-        toolbar.style.overflowY = "hidden";
-        toolbar.style.touchAction = "pan-x";
-        toolbar.style.overscrollBehaviorX = "contain";
-        toolbarObserver?.disconnect();
+        setRibbonHeaderMenu(ribbonHeader);
+        ribbonObserver?.disconnect();
       };
-      if (window.matchMedia("(max-width: 768px)").matches) {
-        toolbarObserver = new MutationObserver(applyMobileToolbarOffset);
-        toolbarObserver.observe(containerElement, {
-          childList: true,
-          subtree: true,
-        });
-        toolbarFrame = requestAnimationFrame(applyMobileToolbarOffset);
-      }
+      ribbonObserver = new MutationObserver(captureRibbonHeaderMenu);
+      ribbonObserver.observe(containerElement, {
+        childList: true,
+        subtree: true,
+      });
+      ribbonFrame = requestAnimationFrame(captureRibbonHeaderMenu);
 
       const subscription = workbook.onCommandExecuted(() => {
         if (readOnly) {
@@ -361,30 +367,9 @@ function TableDocument({ document, readOnly }: Props) {
       });
 
       return () => {
-        cancelAnimationFrame(toolbarFrame);
-        toolbarObserver?.disconnect();
-        mobileToolbarAdjustments.forEach(
-          ({
-            element,
-            marginLeft,
-            width,
-            overflowX,
-            overflowY,
-            touchAction,
-            overscrollBehaviorX,
-            paddingLeft,
-            justifyContent,
-          }) => {
-            element.style.marginLeft = marginLeft;
-            element.style.width = width;
-            element.style.overflowX = overflowX;
-            element.style.overflowY = overflowY;
-            element.style.touchAction = touchAction;
-            element.style.overscrollBehaviorX = overscrollBehaviorX;
-            element.style.paddingLeft = paddingLeft;
-            element.style.justifyContent = justifyContent;
-          }
-        );
+        cancelAnimationFrame(ribbonFrame);
+        ribbonObserver?.disconnect();
+        setRibbonHeaderMenu(null);
         clearTimeout(saveTimer.current);
         disposeTimer.current = setTimeout(() => {
           subscription?.dispose?.();
@@ -399,49 +384,56 @@ function TableDocument({ document, readOnly }: Props) {
     return undefined;
   }, [document, readOnly]);
 
+  const inMobileRibbon = isMobile && Boolean(ribbonHeaderMenu);
+  const header = (
+    <Header $inMobileRibbon={inMobileRibbon}>
+      <MobileMenuButton
+        aria-label="打开导航栏"
+        icon={<MenuIcon />}
+        neutral
+        onClick={ui.toggleMobileSidebar}
+      />
+      {readOnly ? (
+        <ReadOnlyTitle title={displayTitle}>{displayTitle}</ReadOnlyTitle>
+      ) : isEditingTitle ? (
+        <TitleInput
+          ref={titleInputRef}
+          value={draftTitle}
+          placeholder="无标题"
+          aria-label="文档标题"
+          onChange={(event) => setDraftTitle(event.target.value)}
+          onBlur={() => void saveTitle()}
+          onKeyDown={(event) => {
+            if (event.key === "Enter") {
+              event.preventDefault();
+              void saveTitle();
+            }
+            if (event.key === "Escape") {
+              event.preventDefault();
+              cancelTitleEdit();
+            }
+          }}
+        />
+      ) : (
+        <Title
+          type="button"
+          title="点击重命名"
+          onClick={() => {
+            setDraftTitle(document.title);
+            setIsEditingTitle(true);
+          }}
+        >
+          {displayTitle}
+        </Title>
+      )}
+    </Header>
+  );
+
   return (
     <Workspace>
-      <Header ref={headerRef}>
-        <MobileMenuButton
-          aria-label="打开导航栏"
-          icon={<MenuIcon />}
-          neutral
-          onClick={ui.toggleMobileSidebar}
-        />
-        {readOnly ? (
-          <span title={displayTitle}>{displayTitle}</span>
-        ) : isEditingTitle ? (
-          <TitleInput
-            ref={titleInputRef}
-            value={draftTitle}
-            placeholder="无标题"
-            aria-label="文档标题"
-            onChange={(event) => setDraftTitle(event.target.value)}
-            onBlur={() => void saveTitle()}
-            onKeyDown={(event) => {
-              if (event.key === "Enter") {
-                event.preventDefault();
-                void saveTitle();
-              }
-              if (event.key === "Escape") {
-                event.preventDefault();
-                cancelTitleEdit();
-              }
-            }}
-          />
-        ) : (
-          <Title
-            type="button"
-            title="点击重命名"
-            onClick={() => {
-              setDraftTitle(document.title);
-              setIsEditingTitle(true);
-            }}
-          >
-            {displayTitle}
-          </Title>
-        )}
-      </Header>
+      {inMobileRibbon && ribbonHeaderMenu
+        ? createPortal(header, ribbonHeaderMenu)
+        : header}
       {error ? <ErrorPanel>{error}</ErrorPanel> : <Frame ref={containerRef} />}
     </Workspace>
   );
