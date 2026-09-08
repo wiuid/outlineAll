@@ -66,6 +66,8 @@ const Workspace = styled.div`
 
   @media (max-width: 768px) {
     height: 100dvh;
+    display: flex;
+    flex-direction: column;
   }
 `;
 
@@ -77,7 +79,9 @@ const Frame = styled.div`
   overscroll-behavior: none;
 
   @media (max-width: 768px) {
-    touch-action: none;
+    flex: 1 1 auto;
+    min-height: 0;
+    height: auto;
   }
 
   [class*="footer"],
@@ -108,7 +112,18 @@ const Header = styled.div`
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-  pointer-events: auto;
+  @media (max-width: 768px) {
+    position: relative;
+    top: auto;
+    left: auto;
+    z-index: 20;
+    width: 100%;
+    height: 36px;
+    flex: 0 0 36px;
+    padding: 6px 12px;
+    background: var(--theme-bg, #fff);
+    border-bottom: 1px solid rgba(0, 0, 0, 0.08);
+  }
 `;
 
 const Title = styled.button`
