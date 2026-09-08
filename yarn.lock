@@ -17615,7 +17615,6 @@ __metadata:
     "@univerjs/core": "npm:0.25.1"
     "@univerjs/preset-sheets-core": "npm:0.25.1"
     "@univerjs/presets": "npm:0.25.1"
-    "@univerjs/sheets-ui": "npm:0.25.1"
     "@univerjs/ui": "npm:0.25.1"
     "@vitejs/plugin-react": "npm:^6.0.5"
     "@vitest/ui": "npm:^4.1.11"
