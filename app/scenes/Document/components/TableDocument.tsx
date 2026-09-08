@@ -234,6 +234,7 @@ function TableDocument({ document, readOnly }: Props) {
       return;
     }
     clearTimeout(disposeTimer.current);
+    const containerElement = containerRef.current;
 
     try {
       const { univer, univerAPI } = createUniver({
@@ -262,22 +263,40 @@ function TableDocument({ document, readOnly }: Props) {
         marginLeft: string;
         width: string;
       }> = [];
-      if (window.matchMedia("(max-width: 768px)").matches) {
+      let toolbarObserver: MutationObserver | undefined;
+      let toolbarFrame = 0;
+      const applyMobileToolbarOffset = () => {
+        if (
+          !window.matchMedia("(max-width: 768px)").matches ||
+          mobileToolbarAdjustments.length
+        ) {
+          return;
+        }
         const toolbar = Array.from(
-          containerRef.current.querySelectorAll<HTMLElement>("[class*='toolbar']")
+          containerElement.querySelectorAll<HTMLElement>("[class*='toolbar']")
         ).find((element) => {
           const rect = element.getBoundingClientRect();
           return rect.top < 48 && rect.height >= 24 && rect.height <= 64 && rect.width > 160;
         });
-        if (toolbar) {
-          mobileToolbarAdjustments.push({
-            element: toolbar,
-            marginLeft: toolbar.style.marginLeft,
-            width: toolbar.style.width,
-          });
-          toolbar.style.marginLeft = `${MOBILE_HEADER_WIDTH}px`;
-          toolbar.style.width = `calc(100% - ${MOBILE_HEADER_WIDTH}px)`;
+        if (!toolbar) {
+          return;
         }
+        mobileToolbarAdjustments.push({
+          element: toolbar,
+          marginLeft: toolbar.style.marginLeft,
+          width: toolbar.style.width,
+        });
+        toolbar.style.marginLeft = `${MOBILE_HEADER_WIDTH}px`;
+        toolbar.style.width = `calc(100% - ${MOBILE_HEADER_WIDTH}px)`;
+        toolbarObserver?.disconnect();
+      };
+      if (window.matchMedia("(max-width: 768px)").matches) {
+        toolbarObserver = new MutationObserver(applyMobileToolbarOffset);
+        toolbarObserver.observe(containerElement, {
+          childList: true,
+          subtree: true,
+        });
+        toolbarFrame = requestAnimationFrame(applyMobileToolbarOffset);
       }
 
       const subscription = workbook.onCommandExecuted(() => {
@@ -303,6 +322,8 @@ function TableDocument({ document, readOnly }: Props) {
       });
 
       return () => {
+        cancelAnimationFrame(toolbarFrame);
+        toolbarObserver?.disconnect();
         mobileToolbarAdjustments.forEach(({ element, marginLeft, width }) => {
           element.style.marginLeft = marginLeft;
           element.style.width = width;
