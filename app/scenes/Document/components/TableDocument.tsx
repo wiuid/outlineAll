@@ -121,7 +121,9 @@ const Header = styled.div`
     top: 0;
     left: 0;
     z-index: 20;
-    width: ${MOBILE_HEADER_WIDTH}px;
+    width: max-content;
+    min-width: ${MOBILE_HEADER_WIDTH}px;
+    max-width: 45vw;
     height: 36px;
     padding: 6px 8px;
     background: transparent;
@@ -161,6 +163,12 @@ const Title = styled.button`
   text-align: left;
   cursor: pointer;
 
+  @media (max-width: 768px) {
+    flex: 0 1 auto;
+    width: auto;
+    max-width: calc(45vw - 44px);
+  }
+
   &:hover {
     background: rgba(0, 0, 0, 0.06);
   }
@@ -178,6 +186,11 @@ const TitleInput = styled.input`
   background: transparent;
   color: inherit;
   font: inherit;
+  @media (max-width: 768px) {
+    flex: 0 1 auto;
+    width: auto;
+    max-width: calc(45vw - 44px);
+  }
 `;
 
 const ErrorPanel = styled.pre`
@@ -203,6 +216,7 @@ function TableDocument({ document, readOnly }: Props) {
   const saveTimer = useRef<ReturnType<typeof setTimeout>>();
   const disposeTimer = useRef<ReturnType<typeof setTimeout>>();
   const titleInputRef = useRef<HTMLInputElement>(null);
+  const headerRef = useRef<HTMLDivElement>(null);
   const [isEditingTitle, setIsEditingTitle] = useState(false);
   const [draftTitle, setDraftTitle] = useState(document.title);
   const displayTitle = document.title || "无标题";
@@ -273,6 +287,7 @@ function TableDocument({ document, readOnly }: Props) {
         overflowY: string;
         touchAction: string;
         overscrollBehaviorX: string;
+        paddingLeft: string;
       }> = [];
       let toolbarObserver: MutationObserver | undefined;
       let toolbarFrame = 0;
@@ -321,9 +336,13 @@ function TableDocument({ document, readOnly }: Props) {
           overflowY: toolbar.style.overflowY,
           touchAction: toolbar.style.touchAction,
           overscrollBehaviorX: toolbar.style.overscrollBehaviorX,
+          paddingLeft: toolbar.style.paddingLeft,
         });
-        toolbar.style.marginLeft = `${MOBILE_HEADER_WIDTH}px`;
-        toolbar.style.width = `calc(100% - ${MOBILE_HEADER_WIDTH}px)`;
+        const headerWidth =
+          headerRef.current?.getBoundingClientRect().width ?? MOBILE_HEADER_WIDTH;
+        toolbar.style.marginLeft = "0";
+        toolbar.style.width = "100%";
+        toolbar.style.paddingLeft = `${headerWidth}px`;
         toolbar.style.overflowX = "auto";
         toolbar.style.overflowY = "hidden";
         toolbar.style.touchAction = "pan-x";
@@ -373,6 +392,7 @@ function TableDocument({ document, readOnly }: Props) {
             overflowY,
             touchAction,
             overscrollBehaviorX,
+            paddingLeft,
           }) => {
             element.style.marginLeft = marginLeft;
             element.style.width = width;
@@ -380,6 +400,7 @@ function TableDocument({ document, readOnly }: Props) {
             element.style.overflowY = overflowY;
             element.style.touchAction = touchAction;
             element.style.overscrollBehaviorX = overscrollBehaviorX;
+            element.style.paddingLeft = paddingLeft;
           }
         );
         clearTimeout(saveTimer.current);
@@ -398,7 +419,7 @@ function TableDocument({ document, readOnly }: Props) {
 
   return (
     <Workspace>
-      <Header>
+      <Header ref={headerRef}>
         <MobileMenuButton
           aria-label="打开导航栏"
           icon={<MenuIcon />}
