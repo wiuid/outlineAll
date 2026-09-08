@@ -146,6 +146,8 @@ const MobileMenuButton = styled(Button)`
 
 const Title = styled.button`
   pointer-events: auto;
+  flex: 1 1 auto;
+  width: 0;
   max-width: 100%;
   min-width: 0;
   overflow: hidden;
@@ -166,7 +168,9 @@ const Title = styled.button`
 
 const TitleInput = styled.input`
   pointer-events: auto;
-  width: 100%;
+  flex: 1 1 auto;
+  width: 0;
+  min-width: 0;
   padding: 2px 6px;
   border: 1px solid #4c9aff;
   border-radius: 4px;
