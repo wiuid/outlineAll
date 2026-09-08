@@ -144,7 +144,7 @@ const StarredDocumentLink = observer(function StarredDocumentLink({
   );
 
   const handleNewDoc = React.useCallback(
-    async (input: string) => {
+    async (input: string, documentType?: "table") => {
       if (!document) {
         return;
       }
@@ -156,6 +156,7 @@ const StarredDocumentLink = observer(function StarredDocumentLink({
             document.fullWidth ??
             user.getPreference(UserPreference.FullWidthDocuments),
           title: input,
+          documentType,
           data: ProsemirrorDataHelper.getEmpty(),
         },
         { publish: true }
@@ -300,11 +301,12 @@ const StarredCollectionLink = observer(function StarredCollectionLink({
   }, [collection]);
 
   const handleNewDoc = React.useCallback(
-    async (input: string) => {
+    async (input: string, documentType?: "table") => {
       const newDocument = await documents.create(
         {
           collectionId: collection.id,
           title: input,
+          documentType,
           fullWidth: user.getPreference(UserPreference.FullWidthDocuments),
           data: ProsemirrorDataHelper.getEmpty(),
         },
