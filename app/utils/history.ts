@@ -5,6 +5,8 @@ import type {
   LocationState,
 } from "history";
 import { createBrowserHistory, createPath, parsePath } from "history";
+import { toast } from "sonner";
+import { tableSaves } from "~/stores/TableSaveCoordinator";
 import { isMobile } from "@shared/utils/browser";
 import {
   getFocusedSplitPane,
@@ -53,7 +55,57 @@ export function toLocationDescriptor(
   return to;
 }
 
-const history = createBrowserHistory();
+const tableSavePrompt = "outline:flush-table-saves";
+const history = createBrowserHistory({
+  getUserConfirmation: (message, callback) => {
+    if (message !== tableSavePrompt) {
+      callback(window.confirm(message));
+      return;
+    }
+    void tableSaves.flush().then(
+      () => callback(true),
+      (error: unknown) => {
+        toast.error(
+          error instanceof Error ? error.message : "Table save failed"
+        );
+        callback(false);
+      }
+    );
+  },
+});
+
+// Compose with React Router's existing Prompt instead of replacing its guard.
+let routePrompt: Parameters<typeof history.block>[0];
+history.block((location, action) => {
+  const result =
+    typeof routePrompt === "function"
+      ? routePrompt(location, action)
+      : routePrompt;
+  if (result === false) {
+    return false;
+  }
+  if (tableSaves.hasPending) {
+    if (typeof result === "string" && !window.confirm(result)) {
+      return false;
+    }
+    return tableSavePrompt;
+  }
+  return typeof result === "string" ? result : undefined;
+});
+history.block = (prompt = false) => {
+  routePrompt = prompt;
+  return () => {
+    if (routePrompt === prompt) {
+      routePrompt = undefined;
+    }
+  };
+};
+window.addEventListener("beforeunload", (event) => {
+  if (tableSaves.hasPending) {
+    event.preventDefault();
+    event.returnValue = "";
+  }
+});
 
 /**
  * Applies split view handling to a navigation. While a split view is open:

@@ -15,6 +15,7 @@ import type {
 } from "~/types";
 import Analytics from "~/utils/Analytics";
 import history from "~/utils/history";
+import { tableSaves } from "~/stores/TableSaveCoordinator";
 import type { ActionImpl, Action as KbarAction } from "kbar";
 
 /** A command bar action, with the additional properties that Outline renders. */
@@ -346,6 +347,17 @@ export async function performAction(
   action: Exclude<ActionVariant, ActionWithChildren>,
   context: ActionContext
 ) {
+  if (tableSaves.hasPending) {
+    try {
+      await tableSaves.flush();
+    } catch (error) {
+      if (context.isMCP) {
+        throw error;
+      }
+      toast.error(error instanceof Error ? error.message : "Table save failed");
+      return;
+    }
+  }
   const perform =
     action.variant === "action"
       ? () => action.perform(context)

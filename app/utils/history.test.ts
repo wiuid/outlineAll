@@ -7,6 +7,35 @@ import {
   withoutSplitViewNavigation,
 } from "./splitView";
 
+import { tableSaves } from "~/stores/TableSaveCoordinator";
+
+describe("table save navigation guard", () => {
+  it("waits for a table save before push and preserves navigation state", async () => {
+    history.replace("/doc/table");
+    let pending = true;
+    let finish: () => void = () => {};
+    const unregister = tableSaves.register({
+      hasPending: () => pending,
+      flush: () =>
+        new Promise<void>((resolve) => {
+          finish = () => {
+            pending = false;
+            resolve();
+          };
+        }),
+    });
+    try {
+      history.push("/home", { fromTable: true });
+      expect(history.location.pathname).toBe("/doc/table");
+      finish();
+      await vi.waitFor(() => expect(history.location.pathname).toBe("/home"));
+      expect(history.location.state).toEqual({ fromTable: true });
+    } finally {
+      unregister();
+    }
+  });
+});
+
 describe("patchLocation", () => {
   const location: Location = {
     pathname: "/doc/my-doc",

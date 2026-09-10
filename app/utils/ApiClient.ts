@@ -26,6 +26,7 @@ import {
 import { BatchableApiMethods, BatchMaxRequests, CSRF } from "@shared/constants";
 import { getCSRFToken } from "./csrf";
 import AuthenticationHelper from "@shared/helpers/AuthenticationHelper";
+import { tableSaves } from "~/stores/TableSaveCoordinator";
 
 type Options = {
   baseUrl?: string;
@@ -48,6 +49,8 @@ export type UnauthorizedReason = "unauthorized" | "user_suspended";
 type UnauthorizedHandler = (reason: UnauthorizedReason) => void | Promise<void>;
 
 interface FetchOptions {
+  /** Internal workbook persistence request; prevents recursively flushing itself. */
+  tableSave?: boolean;
   download?: boolean;
   retry?: boolean;
   credentials?: "omit" | "same-origin" | "include";
@@ -136,6 +139,14 @@ class ApiClient {
     options: FetchOptions = {}
   ): Promise<T> => {
     let body: string | FormData | undefined;
+    if (
+      method !== "GET" &&
+      !options.tableSave &&
+      tableSaves.hasPending &&
+      !AuthenticationHelper.canAccess(path, [Scope.Read])
+    ) {
+      await tableSaves.flush();
+    }
     let modifiedPath: string | undefined;
     let urlToFetch: string;
     let isJson = false;

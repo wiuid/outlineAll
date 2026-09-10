@@ -9,27 +9,33 @@ import useCurrentUser from "~/hooks/useCurrentUser";
 import { CommentSortType } from "~/types";
 
 type Props = {
+  /** Disable rich-text anchor ordering for whole-table discussions. */
+  documentLevelOnly?: boolean;
   /** Callback when the sort type changes */
   onChange?: (sortType: CommentSortType | "resolved") => void;
   /** Whether resolved comments are being viewed */
   viewingResolved?: boolean;
 };
 
-const CommentSortMenu = ({ viewingResolved, onChange }: Props) => {
+const CommentSortMenu = ({
+  viewingResolved,
+  onChange,
+  documentLevelOnly = false,
+}: Props) => {
   const { t } = useTranslation();
   const user = useCurrentUser();
 
-  const preferredSortType = user.getPreference(
-    UserPreference.SortCommentsByOrderInDocument
-  )
-    ? CommentSortType.OrderInDocument
-    : CommentSortType.MostRecent;
+  const preferredSortType =
+    !documentLevelOnly &&
+    user.getPreference(UserPreference.SortCommentsByOrderInDocument)
+      ? CommentSortType.OrderInDocument
+      : CommentSortType.MostRecent;
 
   const value = viewingResolved ? "resolved" : preferredSortType;
 
   const handleChange = React.useCallback(
     (val: CommentSortType | "resolved") => {
-      if (val !== "resolved") {
+      if (!documentLevelOnly && val !== "resolved") {
         if (val !== preferredSortType) {
           user.setPreference(
             UserPreference.SortCommentsByOrderInDocument,
@@ -41,7 +47,7 @@ const CommentSortMenu = ({ viewingResolved, onChange }: Props) => {
 
       onChange?.(val);
     },
-    [user, onChange, preferredSortType]
+    [user, onChange, preferredSortType, documentLevelOnly]
   );
 
   const options: Option[] = React.useMemo(
@@ -52,11 +58,15 @@ const CommentSortMenu = ({ viewingResolved, onChange }: Props) => {
           label: t("Most recent"),
           value: CommentSortType.MostRecent,
         },
-        {
-          type: "item",
-          label: t("Order in doc"),
-          value: CommentSortType.OrderInDocument,
-        },
+        ...(!documentLevelOnly
+          ? [
+              {
+                type: "item",
+                label: t("Order in doc"),
+                value: CommentSortType.OrderInDocument,
+              } satisfies Option,
+            ]
+          : []),
         {
           type: "separator",
         },
@@ -66,7 +76,7 @@ const CommentSortMenu = ({ viewingResolved, onChange }: Props) => {
           value: "resolved",
         },
       ] satisfies Option[],
-    [t]
+    [t, documentLevelOnly]
   );
 
   return (

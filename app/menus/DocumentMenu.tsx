@@ -25,6 +25,7 @@ import useRequest from "~/hooks/useRequest";
 import useStores from "~/hooks/useStores";
 import { MenuSeparator } from "~/components/primitives/components/Menu";
 import { useDocumentMenuAction } from "~/hooks/useDocumentMenuAction";
+import { isTableDocument } from "~/utils/isTableDocument";
 
 type Props = {
   /** Document for which the menu is to be shown */
@@ -65,6 +66,7 @@ function DocumentMenu({
   const user = useCurrentUser();
   const isMobile = useMobile();
   const can = usePolicy(document);
+  const isTable = isTableDocument(document);
 
   const { subscriptions, pins } = useStores();
   const activeModels = useDocumentActiveModels(document);
@@ -143,7 +145,7 @@ function DocumentMenu({
     return (
       <>
         <MenuSeparator />
-        {showDisplayOptions && <HeadingPrefixMenuItem />}
+        {showDisplayOptions && !isTable && <HeadingPrefixMenuItem />}
         <DisplayOptions>
           {can.updateInsights && (
             <Style>
@@ -157,7 +159,7 @@ function DocumentMenu({
               />
             </Style>
           )}
-          {showToggleEmbeds && (
+          {showToggleEmbeds && !isTable && (
             <Style>
               <ToggleMenuItem
                 width={26}
@@ -169,7 +171,7 @@ function DocumentMenu({
               />
             </Style>
           )}
-          {showDisplayOptions && !isMobile && (
+          {showDisplayOptions && !isMobile && !isTable && (
             <Style>
               <ToggleMenuItem
                 width={26}
@@ -188,6 +190,7 @@ function DocumentMenu({
     t,
     can.update,
     can.updateInsights,
+    isTable,
     document.embedsDisabled,
     document.fullWidth,
     document.insightsEnabled,

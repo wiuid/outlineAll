@@ -23,6 +23,7 @@ import type { Editor as SharedEditor } from "~/editor";
 import useCurrentUser from "~/hooks/useCurrentUser";
 import useOnClickOutside from "~/hooks/useOnClickOutside";
 import useStores from "~/hooks/useStores";
+import { isTableDocument } from "~/utils/isTableDocument";
 import { Bubble } from "./CommentThreadItem";
 import { HighlightedText } from "./HighlightText";
 import lazyWithRetry from "~/utils/lazyWithRetry";
@@ -83,7 +84,7 @@ function CommentForm({
   highlightedText,
   ...rest
 }: Props) {
-  const { editor } = useDocumentContext();
+  const { editor: documentEditor } = useDocumentContext();
   const formRef = React.useRef<HTMLFormElement>(null);
   const editorRef = React.useRef<SharedEditor>(null);
   const [forceRender, setForceRender] = React.useState(0);
@@ -92,7 +93,9 @@ function CommentForm({
   const hasFocusedOnMount = React.useRef(false);
   const theme = useTheme();
   const { t } = useTranslation();
-  const { comments } = useStores();
+  const { comments, documents } = useStores();
+  const documentLevelOnly = isTableDocument(documents.get(documentId));
+  const editor = documentLevelOnly ? undefined : documentEditor;
   const user = useCurrentUser();
 
   const reset = React.useCallback(async () => {
@@ -137,7 +140,7 @@ function CommentForm({
       .save({
         documentId,
         data: draft,
-        ...thread?.pendingAnchor,
+        ...(documentLevelOnly ? undefined : thread?.pendingAnchor),
       })
       // Note: pendingAnchor is intentionally kept after saving — it continues
       // to provide the highlighted snippet until the server-applied mark
@@ -208,7 +211,7 @@ function CommentForm({
     );
 
     comment.id = uuidv4();
-    if (!thread) {
+    if (!thread && !documentLevelOnly) {
       onBeforeCreate?.(comment);
     }
     comments.add(comment);
@@ -218,7 +221,7 @@ function CommentForm({
         documentId,
         parentCommentId: thread?.id,
         data: draft,
-        ...comment.pendingAnchor,
+        ...(documentLevelOnly ? undefined : comment.pendingAnchor),
       })
       .then(() => onSubmit?.())
       .catch(() => {
@@ -376,7 +379,7 @@ function CommentForm({
           $firstOfThread={standalone}
           column
         >
-          {highlightedText && (
+          {!documentLevelOnly && highlightedText && (
             <HighlightedText>{highlightedText}</HighlightedText>
           )}
           <React.Suspense fallback={<div style={{ height: 24 }} />}>

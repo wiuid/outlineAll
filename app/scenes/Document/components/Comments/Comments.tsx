@@ -28,6 +28,7 @@ import CommentSortMenu from "./CommentSortMenu";
 import CommentThread from "./CommentThread";
 import Sidebar from "../SidebarLayout";
 import useMobile from "~/hooks/useMobile";
+import { isTableDocument } from "~/utils/isTableDocument";
 
 function Comments() {
   const { ui, comments, documents } = useStores();
@@ -38,6 +39,8 @@ function Comments() {
   const { t } = useTranslation();
   const match = useRouteMatch<{ documentSlug: string }>();
   const document = documents.get(match.params.documentSlug);
+  const documentLevelOnly = isTableDocument(document);
+  const ready = documentLevelOnly || isEditorInitialized;
   const focusedComment = useFocusedComment();
   const can = usePolicy(document);
   const isMobile = useMobile();
@@ -65,14 +68,14 @@ function Comments() {
     undefined
   );
 
-  const sortOption: CommentSortOption = user.getPreference(
-    UserPreference.SortCommentsByOrderInDocument
-  )
-    ? {
-        type: CommentSortType.OrderInDocument,
-        referencedCommentIds: editor?.getComments().map((c) => c.id) ?? [],
-      }
-    : { type: CommentSortType.MostRecent };
+  const sortOption: CommentSortOption =
+    !documentLevelOnly &&
+    user.getPreference(UserPreference.SortCommentsByOrderInDocument)
+      ? {
+          type: CommentSortType.OrderInDocument,
+          referencedCommentIds: editor?.getComments().map((c) => c.id) ?? [],
+        }
+      : { type: CommentSortType.MostRecent };
 
   const threads = !document
     ? []
@@ -106,7 +109,7 @@ function Comments() {
 
   useEffect(() => {
     // Handles: 1. on refresh 2. when switching sort setting
-    const readyToDisplay = Boolean(document && isEditorInitialized);
+    const readyToDisplay = Boolean(document && ready);
     if (
       readyToDisplay &&
       sortOption.type === CommentSortType.MostRecent &&
@@ -114,7 +117,7 @@ function Comments() {
     ) {
       scrollToBottom();
     }
-  }, [sortOption.type, document, isEditorInitialized, viewingResolved]);
+  }, [sortOption.type, document, ready, viewingResolved]);
 
   useEffect(() => {
     setShowJumpToRecentBtn(false);
@@ -132,7 +135,7 @@ function Comments() {
   }, [sortOption.type, threads.length, viewingResolved]);
 
   const content =
-    !document || !isEditorInitialized ? null : (
+    !document || !ready ? null : (
       <>
         <Scrollable
           id="comments"
@@ -198,6 +201,7 @@ function Comments() {
             {t("Comments")}
           </div>
           <CommentSortMenu
+            documentLevelOnly={documentLevelOnly}
             viewingResolved={viewingResolved}
             onChange={(val) => {
               setViewingResolved(val === "resolved");

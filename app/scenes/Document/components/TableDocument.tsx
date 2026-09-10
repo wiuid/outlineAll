@@ -1,5 +1,6 @@
 import { createUniver } from "@univerjs/presets";
-import { LocaleType } from "@univerjs/core";
+import { CommandType, LocaleType } from "@univerjs/core";
+import type { ICommandInfo } from "@univerjs/core";
 import { UniverSheetsCorePreset } from "@univerjs/preset-sheets-core";
 import zhCN from "@univerjs/preset-sheets-core/locales/zh-CN";
 import { SetScrollRelativeCommand } from "@univerjs/sheets-ui";
@@ -10,6 +11,10 @@ import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import styled from "styled-components";
 import Button from "~/components/Button";
+import DocumentMenu from "~/menus/DocumentMenu";
+import usePolicy from "~/hooks/usePolicy";
+import { DebouncedTableSave, tableSaves } from "~/stores/TableSaveCoordinator";
+import { toast } from "sonner";
 import type Document from "~/models/Document";
 import useMediaQuery from "~/hooks/useMediaQuery";
 import useStores from "~/hooks/useStores";
@@ -87,12 +92,14 @@ const Workspace = styled.div`
   }
 `;
 
-const Frame = styled.div`
+const Frame = styled.div<{ $permissionReady: boolean }>`
   height: 100%;
   width: 100%;
   position: relative;
   overflow: hidden;
   overscroll-behavior: none;
+  pointer-events: ${({ $permissionReady }) =>
+    $permissionReady ? "auto" : "none"};
 
   @media ${TABLE_DOCUMENT_MOBILE_MEDIA_QUERY} {
     flex: none;
@@ -247,6 +254,9 @@ const TitleInput = styled.input`
 `;
 
 const ErrorPanel = styled.pre`
+  position: absolute;
+  bottom: 32px;
+  z-index: 30;
   margin: 24px;
   padding: 16px;
   white-space: pre-wrap;
@@ -265,15 +275,23 @@ function formatError(error: unknown) {
 }
 
 function TableDocument({ document, readOnly }: Props) {
-  const { ui } = useStores();
+  const { ui, auth } = useStores();
+  const can = usePolicy(document);
+  const editable = !readOnly && Boolean(auth.user && can.update);
+  const editableRef = useRef(editable);
+  editableRef.current = editable;
   const isMobile = useMediaQuery(TABLE_DOCUMENT_MOBILE_MEDIA_QUERY);
   const [error, setError] = useState<string | null>(null);
+  const [permissionReady, setPermissionReady] = useState(editable);
   const [ribbonHeaderMenu, setRibbonHeaderMenu] = useState<HTMLElement | null>(
     null
   );
   const containerRef = useRef<HTMLDivElement>(null);
-  const saveTimer = useRef<ReturnType<typeof setTimeout>>();
-  const disposeTimer = useRef<ReturnType<typeof setTimeout>>();
+  const disposeTimerRef = useRef<ReturnType<typeof setTimeout>>();
+  const cleanupRef = useRef<(() => void) | undefined>();
+  const disposeNowRef = useRef<(() => void) | undefined>();
+  const resourceDocumentIdRef = useRef<string>();
+  const applyPermissionRef = useRef<((canEdit: boolean) => void) | undefined>();
   const titleInputRef = useRef<HTMLInputElement>(null);
 
   const [isEditingTitle, setIsEditingTitle] = useState(false);
@@ -288,6 +306,9 @@ function TableDocument({ document, readOnly }: Props) {
   }, [isEditingTitle]);
 
   const saveTitle = async () => {
+    if (!editableRef.current) {
+      return;
+    }
     const nextTitle = draftTitle.trim();
     if (nextTitle === document.title.trim()) {
       setIsEditingTitle(false);
@@ -295,6 +316,7 @@ function TableDocument({ document, readOnly }: Props) {
     }
 
     try {
+      await tableSaves.flush();
       await document.store.update({ id: document.id, title: nextTitle });
       setIsEditingTitle(false);
     } catch (titleError) {
@@ -310,10 +332,16 @@ function TableDocument({ document, readOnly }: Props) {
   };
 
   useEffect(() => {
+    clearTimeout(disposeTimerRef.current);
+    if (cleanupRef.current) {
+      if (resourceDocumentIdRef.current === document.id) {
+        return cleanupRef.current;
+      }
+      disposeNowRef.current?.();
+    }
     if (!containerRef.current) {
       return;
     }
-    clearTimeout(disposeTimer.current);
     const containerElement = containerRef.current;
 
     try {
@@ -323,8 +351,8 @@ function TableDocument({ document, readOnly }: Props) {
         presets: [
           UniverSheetsCorePreset({
             container: containerRef.current,
-            toolbar: !readOnly,
-            formulaBar: !readOnly,
+            toolbar: editableRef.current,
+            formulaBar: editableRef.current,
             footer: {
               sheetBar: true,
               statisticBar: false,
@@ -337,6 +365,30 @@ function TableDocument({ document, readOnly }: Props) {
       const workbook = univerAPI.createWorkbook(
         getWorkbookData(document.tableData)
       );
+      const readOnlyGuard = workbook.onBeforeCommandExecute(
+        (command: ICommandInfo) => {
+          // Univer 0.25.1's editable permission does not cover every command
+          // path. Mutations are the authoritative class of snapshot changes.
+          if (!editableRef.current && command.type === CommandType.MUTATION) {
+            throw new Error("Table is read-only");
+          }
+        }
+      );
+      const applyPermission = (canEdit: boolean) => {
+        setPermissionReady(false);
+        // Gate edits inside Univer, not just in the visible toolbar or save path.
+        workbook.setEditable(canEdit);
+        const permission = workbook.getWorkbookPermission();
+        void (
+          canEdit ? permission.setEditable() : permission.setReadOnly()
+        ).then(
+          () => setPermissionReady(true),
+          (permissionError: unknown) => {
+            setError(`表格权限设置失败：${formatError(permissionError)}`);
+          }
+        );
+      };
+      applyPermissionRef.current = applyPermission;
 
       let isCellEditing = false;
       const editStartedSubscription = univerAPI.addEvent(
@@ -383,48 +435,111 @@ function TableDocument({ document, readOnly }: Props) {
       });
       ribbonFrame = requestAnimationFrame(captureRibbonHeaderMenu);
 
-      const subscription = workbook.onCommandExecuted(() => {
-        if (readOnly) {
-          return;
+      let mounted = true;
+      const reportSaveError = (saveError: unknown) => {
+        const message = `表格保存失败：${formatError(saveError)}`;
+        if (mounted) {
+          setError(message);
         }
-        clearTimeout(saveTimer.current);
-        saveTimer.current = setTimeout(async () => {
-          try {
-            const tableData = workbook.save();
-            await client.post("/documents.update", {
-              id: document.id,
-              tableData,
-              done: true,
-            });
-            document.tableData = tableData;
-          } catch (saveError) {
-            setError(`表格保存失败：${formatError(saveError)}`);
-            // eslint-disable-next-line no-console
-            console.error("[table-page] save failed", saveError);
+        toast.error(message);
+      };
+      const pendingSave = new DebouncedTableSave(async () => {
+        if (!editableRef.current) {
+          throw new Error("Table is no longer editable");
+        }
+        const tableData = workbook.save();
+        await client.post(
+          "/documents.update",
+          {
+            id: document.id,
+            tableData,
+            done: true,
+          },
+          { tableSave: true }
+        );
+        document.tableData = tableData;
+        if (mounted) {
+          setError(null);
+        }
+      }, reportSaveError);
+      const flush = async () => {
+        if (workbook.isCellEditing()) {
+          if (!editableRef.current || !(await workbook.endEditingAsync(true))) {
+            throw new Error(
+              "Finish editing the current cell before leaving the table"
+            );
           }
-        }, 800);
+          pendingSave.schedule();
+        }
+        await pendingSave.flush();
+      };
+      const unregister = tableSaves.register({
+        hasPending: () =>
+          pendingSave.hasPending ||
+          (editableRef.current && workbook.isCellEditing()),
+        flush,
+      });
+      const subscription = workbook.onCommandExecuted(() => {
+        if (editableRef.current) {
+          pendingSave.schedule();
+        }
       });
 
-      return () => {
+      let released = false;
+      const release = () => {
+        if (released) {
+          return;
+        }
+        released = true;
+        mounted = false;
+        readOnlyGuard.dispose();
         disposeMobileGestures();
         editStartedSubscription.dispose();
         editEndedSubscription.dispose();
         cancelAnimationFrame(ribbonFrame);
         ribbonObserver?.disconnect();
         setRibbonHeaderMenu(null);
-        clearTimeout(saveTimer.current);
-        disposeTimer.current = setTimeout(() => {
-          subscription?.dispose?.();
-          univer.dispose();
+        subscription.dispose();
+        unregister();
+        univer.dispose();
+        if (cleanupRef.current === cleanup) {
+          cleanupRef.current = undefined;
+          disposeNowRef.current = undefined;
+          resourceDocumentIdRef.current = undefined;
+          if (applyPermissionRef.current === applyPermission) {
+            applyPermissionRef.current = undefined;
+          }
+        }
+      };
+      const disposeNow = () => {
+        clearTimeout(disposeTimerRef.current);
+        mounted = false;
+        const saving = flush();
+        release();
+        void saving.catch(reportSaveError);
+      };
+      const cleanup = () => {
+        clearTimeout(disposeTimerRef.current);
+        disposeTimerRef.current = setTimeout(() => {
+          mounted = false;
+          void flush().catch(reportSaveError).finally(release);
         }, 0);
       };
+      cleanupRef.current = cleanup;
+      disposeNowRef.current = disposeNow;
+      resourceDocumentIdRef.current = document.id;
+      return cleanup;
     } catch (initializationError) {
       setError(`表格初始化失败：${formatError(initializationError)}`);
       // eslint-disable-next-line no-console
       console.error("[table-page] initialization failed", initializationError);
     }
     return undefined;
-  }, [document, readOnly]);
+  }, [document]);
+
+  useEffect(() => {
+    applyPermissionRef.current?.(editable);
+  }, [editable]);
 
   const inMobileRibbon = isMobile && Boolean(ribbonHeaderMenu);
   const header = (
@@ -435,7 +550,7 @@ function TableDocument({ document, readOnly }: Props) {
         neutral
         onClick={ui.toggleMobileSidebar}
       />
-      {readOnly ? (
+      {!editable ? (
         <ReadOnlyTitle title={displayTitle}>{displayTitle}</ReadOnlyTitle>
       ) : isEditingTitle ? (
         <TitleInput
@@ -471,14 +586,59 @@ function TableDocument({ document, readOnly }: Props) {
     </Header>
   );
 
+  const menu = auth.user ? (
+    <TableActions $inMobileRibbon={inMobileRibbon}>
+      <DocumentMenu
+        document={document}
+        align="end"
+        neutral
+        showDisplayOptions
+        onRename={
+          editable
+            ? () => {
+                setDraftTitle(document.title);
+                setIsEditingTitle(true);
+              }
+            : undefined
+        }
+      />
+    </TableActions>
+  ) : null;
+
   return (
     <Workspace>
       {inMobileRibbon && ribbonHeaderMenu
-        ? createPortal(header, ribbonHeaderMenu)
+        ? createPortal(
+            <>
+              {header}
+              {menu}
+            </>,
+            ribbonHeaderMenu
+          )
         : header}
-      {error ? <ErrorPanel>{error}</ErrorPanel> : <Frame ref={containerRef} />}
+      {!inMobileRibbon && menu}
+      {error && <ErrorPanel role="alert">{error}</ErrorPanel>}
+      <Frame ref={containerRef} $permissionReady={permissionReady} />
     </Workspace>
   );
 }
+
+const TableActions = styled.div<{ $inMobileRibbon: boolean }>`
+  position: absolute;
+  top: 0;
+  right: 4px;
+  height: 36px;
+  z-index: 21;
+  display: flex;
+  align-items: center;
+  background: ${({ theme }) => theme.background};
+
+  @media ${TABLE_DOCUMENT_MOBILE_MEDIA_QUERY} {
+    position: ${({ $inMobileRibbon }) =>
+      $inMobileRibbon ? "static" : "absolute"};
+    flex: 0 0 36px;
+    order: 2;
+  }
+`;
 
 export default observer(TableDocument);

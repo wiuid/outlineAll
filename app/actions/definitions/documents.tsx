@@ -40,6 +40,7 @@ import {
   ExportIcon,
   CodeIcon,
   PDFIcon,
+  InputIcon,
 } from "outline-icons";
 import { toast } from "sonner";
 import Icon from "@shared/components/Icon";
@@ -73,6 +74,7 @@ import {
   createActionGroup,
   createActionWithChildren,
   createInternalLinkAction,
+  resolve,
 } from "~/actions";
 import {
   dialogActionFactory,
@@ -109,6 +111,7 @@ import type {
   Action,
   ActionContext,
   ActionGroup,
+  ActionVariant,
   ActionSeparator as TActionSeparator,
 } from "~/types";
 import lazyWithRetry from "~/utils/lazyWithRetry";
@@ -116,6 +119,8 @@ import env from "~/env";
 import { isMac, isWindows } from "@shared/utils/browser";
 import isCloudHosted from "~/utils/isCloudHosted";
 import DocumentMove from "~/components/DocumentExplorer/DocumentMove";
+import { isTableDocument } from "~/utils/isTableDocument";
+import { TableDocumentRenameDialog } from "~/components/TableDocumentRenameDialog";
 
 const Insights = lazyWithRetry(
   () => import("~/scenes/Document/components/Insights")
@@ -123,6 +128,23 @@ const Insights = lazyWithRetry(
 const SharePopover = lazyWithRetry(
   () => import("~/components/Sharing/Document/SharePopover")
 );
+
+/** Keeps rich-text-only actions out of every table document entry point. */
+function hideForTableDocuments<T extends ActionVariant>(action: T): T {
+  const visible = action.visible;
+  action.visible = (context: ActionContext) => {
+    const documents = context.getActiveModels(Document);
+    const activeDocument = context.activeDocumentId
+      ? context.stores.documents.get(context.activeDocumentId)
+      : undefined;
+    return (
+      !(documents.length ? documents : [activeDocument]).some(
+        isTableDocument
+      ) && resolve<boolean>(visible, context) !== false
+    );
+  };
+  return action;
+}
 
 export const openDocument = createActionWithChildren({
   name: ({ t }) => t("Open document"),
@@ -198,6 +220,41 @@ export const editDocument = createInternalLinkAction({
     }
 
     return documentEditPath(document);
+  },
+});
+
+/** Table-only Rename command for entry points without an inline title editor. */
+export const renameTableDocument = createAction({
+  name: ({ t }) => `${t("Rename")}…`,
+  analyticsName: "Rename table document",
+  section: ActiveDocumentSection,
+  icon: <InputIcon />,
+  visible: ({ activeDocumentId, stores }) => {
+    const document = activeDocumentId
+      ? stores.documents.get(activeDocumentId)
+      : undefined;
+    return (
+      isTableDocument(document) &&
+      Boolean(
+        activeDocumentId && stores.policies.abilities(activeDocumentId).update
+      )
+    );
+  },
+  perform: ({ activeDocumentId, stores, t }) => {
+    const document = activeDocumentId
+      ? stores.documents.get(activeDocumentId)
+      : undefined;
+    if (
+      !document ||
+      !isTableDocument(document) ||
+      !stores.policies.abilities(document.id).update
+    ) {
+      return;
+    }
+    stores.dialogs.openModal({
+      title: t("Rename"),
+      content: <TableDocumentRenameDialog document={document} />,
+    });
   },
 });
 
@@ -277,7 +334,7 @@ function findDocumentSiblingIndex(
 /**
  * Determines whether the user can create a sibling of the given document.
  * A sibling shares the document's parent, so this mirrors the backend's
- * create authorization: create permission on the parent document, or on the
+ * create authorization: create *** on the parent document, or on the
  * collection when the document is at the root.
  *
  * @param stores - the root stores.
@@ -824,6 +881,7 @@ export const downloadDocumentAsMarkdown = createAction({
     });
   },
 });
+hideForTableDocuments(downloadDocumentAsMarkdown);
 
 export const downloadDocumentAsHTML = createAction({
   name: ({ t, isMenu }) => (isMenu ? t("HTML") : t("Download as HTML")),
@@ -845,6 +903,7 @@ export const downloadDocumentAsHTML = createAction({
     });
   },
 });
+hideForTableDocuments(downloadDocumentAsHTML);
 
 export const downloadDocumentAsTextBundle = createAction({
   name: ({ t, isMenu }) =>
@@ -867,6 +926,7 @@ export const downloadDocumentAsTextBundle = createAction({
     });
   },
 });
+hideForTableDocuments(downloadDocumentAsTextBundle);
 
 export const downloadDocumentAsPDF = createAction({
   name: ({ t, isMenu }) => (isMenu ? t("PDF") : t("Download as PDF")),
@@ -892,6 +952,7 @@ export const downloadDocumentAsPDF = createAction({
     });
   },
 });
+hideForTableDocuments(downloadDocumentAsPDF);
 
 export const copyDocumentAsMarkdown = createAction({
   name: ({ t }) => t("Copy as Markdown"),
@@ -915,6 +976,7 @@ export const copyDocumentAsMarkdown = createAction({
     }
   },
 });
+hideForTableDocuments(copyDocumentAsMarkdown);
 
 export const copyDocumentAsPlainText = createAction({
   name: ({ t }) => t("Copy as text"),
@@ -934,6 +996,7 @@ export const copyDocumentAsPlainText = createAction({
     }
   },
 });
+hideForTableDocuments(copyDocumentAsPlainText);
 
 export const copyDocumentShareLink = createAction({
   name: ({ t }) => t("Copy public link"),
@@ -1019,6 +1082,7 @@ export const duplicateDocument = createAction({
     });
   },
 });
+hideForTableDocuments(duplicateDocument);
 
 function pinToCollectionName({ getActiveModels, t, stores }: ActionContext) {
   const documents = getActiveModels(Document);
@@ -1230,6 +1294,7 @@ export const searchInDocument = createInternalLinkAction({
     };
   },
 });
+hideForTableDocuments(searchInDocument);
 
 export const printDocument = createAction({
   name: ({ t, isMenu }) => (isMenu ? t("Print") : t("Print document")),
@@ -1242,6 +1307,7 @@ export const printDocument = createAction({
     setTimeout(window.print, 0);
   },
 });
+hideForTableDocuments(printDocument);
 
 export const exportDocument = createActionWithChildren({
   name: ({ t, isMenu }) => (isMenu ? t("Export") : t("Export document")),
@@ -1258,6 +1324,7 @@ export const exportDocument = createActionWithChildren({
     printDocument,
   ],
 });
+hideForTableDocuments(exportDocument);
 
 export const openDocumentInDesktop = createAction({
   name: ({ t }) => t("Open in desktop app"),
@@ -1286,6 +1353,7 @@ export const openDocumentInDesktop = createAction({
     }
   },
 });
+hideForTableDocuments(openDocumentInDesktop);
 
 export const openDocumentInSplit = createAction({
   name: ({ t }) => t("Open in split view"),
@@ -1308,6 +1376,7 @@ export const openDocumentInSplit = createAction({
     }
   },
 });
+hideForTableDocuments(openDocumentInSplit);
 
 export const presentDocument = createAction({
   name: ({ t, isMenu }) => (isMenu ? t("Present") : t("Present document")),
@@ -1332,6 +1401,7 @@ export const presentDocument = createAction({
     stores.ui.setPresentingDocument(document);
   },
 });
+hideForTableDocuments(presentDocument);
 
 /**
  * Returns the document or collection that an import will be nested inside.
@@ -1419,6 +1489,7 @@ export const createTemplateFromDocument = createAction({
     });
   },
 });
+hideForTableDocuments(createTemplateFromDocument);
 
 export const openRandomDocument = createAction({
   id: "random",
@@ -1824,6 +1895,7 @@ export const openDocumentHistory = createInternalLinkAction({
     };
   },
 });
+hideForTableDocuments(openDocumentHistory);
 
 export const openDocumentInsights = createAction({
   name: ({ t }) => t("Insights"),
@@ -1882,6 +1954,7 @@ export const toggleDocumentStats = createAction({
     await user.save();
   },
 });
+hideForTableDocuments(toggleDocumentStats);
 
 /** An example of the numbering each style produces, used to aid search. */
 const headingPrefixExamples: Record<HeadingPrefixStyle, string> = {
@@ -1951,6 +2024,7 @@ export const changeHeadingPrefix = createActionWithChildren({
   },
   children: Object.values(HeadingPrefixStyle).map(changeHeadingPrefixFactory),
 });
+hideForTableDocuments(changeHeadingPrefix);
 
 export const leaveDocument = createAction({
   name: ({ t }) => t("Leave document"),
@@ -1993,24 +2067,27 @@ export const applyTemplateActionFactory = ({
 }: {
   actions: (Action | ActionGroup | TActionSeparator)[];
 }) =>
-  createActionWithChildren({
-    name: ({ t }) => t("Apply template"),
-    analyticsName: "Apply template",
-    section: ActiveDocumentSection,
-    icon: <ShapesIcon />,
-    visible: ({ activeDocumentId, stores }) => {
-      const { policies } = stores;
-      const can = activeDocumentId
-        ? policies.abilities(activeDocumentId)
-        : undefined;
+  hideForTableDocuments(
+    createActionWithChildren({
+      name: ({ t }) => t("Apply template"),
+      analyticsName: "Apply template",
+      section: ActiveDocumentSection,
+      icon: <ShapesIcon />,
+      visible: ({ activeDocumentId, stores }) => {
+        const { policies } = stores;
+        const can = activeDocumentId
+          ? policies.abilities(activeDocumentId)
+          : undefined;
 
-      return !!can?.update;
-    },
-    children: actions,
-  });
+        return !!can?.update;
+      },
+      children: actions,
+    })
+  );
 
 export const rootDocumentActions = [
   openDocument,
+  renameTableDocument,
   archiveDocument,
   createDocument,
   createDraftDocument,

@@ -42,6 +42,9 @@ import { ActiveDocumentSection } from "~/actions/sections";
 import useMobile from "./useMobile";
 import type Template from "~/models/Template";
 import { useTemplateMenuActions } from "./useTemplateMenuActions";
+import useStores from "./useStores";
+import { isTableDocument } from "~/utils/isTableDocument";
+import { createTableDocumentMenuAction } from "~/actions/definitions/tableDocuments";
 
 type Props = {
   /** Document ID for which the actions are generated */
@@ -65,13 +68,20 @@ export function useDocumentMenuAction({
 }: Props) {
   const { t } = useTranslation();
   const isMobile = useMobile();
+  const { documents } = useStores();
+  const isTable = isTableDocument(documents.get(documentId));
 
   const templateMenuActions = useTemplateMenuActions({
     documentId,
     onSelectTemplate,
   });
 
-  return useCallback(
+  const tableAction = useCallback(
+    () => createTableDocumentMenuAction(documentId, onRename),
+    [documentId, onRename]
+  );
+
+  const documentAction = useCallback(
     () =>
       createRootMenuAction([
         restoreDocument,
@@ -133,4 +143,6 @@ export function useDocumentMenuAction({
       onRename,
     ]
   );
+
+  return isTable ? tableAction : documentAction;
 }

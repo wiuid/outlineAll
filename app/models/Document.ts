@@ -31,6 +31,8 @@ import type DocumentsStore from "~/stores/DocumentsStore";
 import User from "~/models/User";
 import type { Properties } from "~/types";
 import { client } from "~/utils/ApiClient";
+import { tableSaves } from "~/stores/TableSaveCoordinator";
+import { isTableDocument } from "~/utils/isTableDocument";
 import Collection from "./Collection";
 import type Notification from "./Notification";
 import type View from "./View";
@@ -626,6 +628,9 @@ export default class Document extends ArchivableModel implements Searchable {
     fields?: Properties<typeof this>,
     options?: SaveOptions
   ): Promise<Document> => {
+    if (isTableDocument(this) && tableSaves.hasPending) {
+      await tableSaves.flush();
+    }
     const params = fields ?? this.toAPI();
     this.isSaving = true;
 
