@@ -1,5 +1,5 @@
 import { createUniver } from "@univerjs/presets";
-import { CommandType, LocaleType } from "@univerjs/core";
+import { CommandType, LocaleType, WrapStrategy } from "@univerjs/core";
 import type { ICommandInfo } from "@univerjs/core";
 import { UniverSheetsCorePreset } from "@univerjs/preset-sheets-core";
 import zhCN from "@univerjs/preset-sheets-core/locales/zh-CN";
@@ -90,6 +90,39 @@ type TableDataSnapshot = {
   styles?: Record<string, Record<string, JSONValue>>;
   sheets?: Record<string, TableSheetSnapshot>;
 };
+interface TableSheetEditEndedEvent {
+  worksheet: {
+    getSheetName(): string;
+    getRange(
+      row: number,
+      column: number
+    ): {
+      setWrapStrategy(strategy: WrapStrategy): unknown;
+      setVerticalAlignment(alignment: "top"): unknown;
+      setHorizontalAlignment(alignment: "left"): unknown;
+    };
+  };
+  row: number;
+  column: number;
+  isConfirm: boolean;
+}
+
+function getTableCellText(cell: TableCellSnapshot): string | undefined {
+  if (typeof cell.v === "string") {
+    return cell.v;
+  }
+  const richText = cell.p;
+  if (!richText || typeof richText !== "object" || Array.isArray(richText)) {
+    return undefined;
+  }
+  const body = richText.body;
+  if (!body || typeof body !== "object" || Array.isArray(body)) {
+    return undefined;
+  }
+  return typeof body.dataStream === "string"
+    ? body.dataStream.replace(/\r\n$/, "")
+    : undefined;
+}
 
 export function normalizeDailyTableWrapping(
   snapshot: TableDataSnapshot
@@ -109,11 +142,15 @@ export function normalizeDailyTableWrapping(
     const rowData = sheet.rowData ?? (sheet.rowData = {});
     Object.entries(cells).forEach(([rowIndex, row]) => {
       const workCell = row["1"];
-      if (!workCell || typeof workCell.v !== "string") {
+      if (!workCell) {
+        return;
+      }
+      const cellText = getTableCellText(workCell);
+      if (cellText === undefined) {
         return;
       }
       workCell.s = "daily-wrap";
-      const lineCount = Math.max(1, workCell.v.split("\n").length);
+      const lineCount = Math.max(1, cellText.split(/\r\n|\r|\n/).length);
       rowData[rowIndex] = {
         ...rowData[rowIndex],
         h: Math.min(Math.max(24, lineCount * 20 + 8), 1200),
@@ -123,7 +160,6 @@ export function normalizeDailyTableWrapping(
 
   return snapshot;
 }
-
 
 const Workspace = styled.div`
   position: relative;
@@ -447,8 +483,18 @@ function TableDocument({ document, readOnly, isShared = false }: Props) {
       );
       const editEndedSubscription = univerAPI.addEvent(
         univerAPI.Event.SheetEditEnded,
-        () => {
+        ({ worksheet, row, column, isConfirm }: TableSheetEditEndedEvent) => {
           isCellEditing = false;
+          if (
+            isConfirm &&
+            worksheet.getSheetName() === "日报" &&
+            column === 1
+          ) {
+            const editedCell = worksheet.getRange(row, column);
+            editedCell.setWrapStrategy(WrapStrategy.WRAP);
+            editedCell.setVerticalAlignment("top");
+            editedCell.setHorizontalAlignment("left");
+          }
         }
       );
       const disposeMobileGestures = installMobileSheetGestures({
@@ -634,24 +680,25 @@ function TableDocument({ document, readOnly, isShared = false }: Props) {
     </Header>
   );
 
-  const menu = !isShared && auth.user ? (
-    <TableActions $inMobileRibbon={inMobileRibbon}>
-      <DocumentMenu
-        document={document}
-        align="end"
-        neutral
-        showDisplayOptions
-        onRename={
-          editable
-            ? () => {
-                setDraftTitle(document.title);
-                setIsEditingTitle(true);
-              }
-            : undefined
-        }
-      />
-    </TableActions>
-  ) : null;
+  const menu =
+    !isShared && auth.user ? (
+      <TableActions $inMobileRibbon={inMobileRibbon}>
+        <DocumentMenu
+          document={document}
+          align="end"
+          neutral
+          showDisplayOptions
+          onRename={
+            editable
+              ? () => {
+                  setDraftTitle(document.title);
+                  setIsEditingTitle(true);
+                }
+              : undefined
+          }
+        />
+      </TableActions>
+    ) : null;
 
   return (
     <Workspace>
@@ -666,7 +713,11 @@ function TableDocument({ document, readOnly, isShared = false }: Props) {
         : header}
       {!inMobileRibbon && menu}
       {error && <ErrorPanel role="alert">{error}</ErrorPanel>}
-      <Frame ref={containerRef} $permissionReady={permissionReady} $shared={isShared} />
+      <Frame
+        ref={containerRef}
+        $permissionReady={permissionReady}
+        $shared={isShared}
+      />
     </Workspace>
   );
 }

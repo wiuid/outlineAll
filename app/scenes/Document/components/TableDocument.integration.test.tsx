@@ -2,7 +2,7 @@ import { act, StrictMode } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { ThemeProvider } from "styled-components";
 import { light } from "@shared/styles/theme";
-import { CommandType } from "@univerjs/core";
+import { CommandType, WrapStrategy } from "@univerjs/core";
 import { tableSaves } from "~/stores/TableSaveCoordinator";
 import stores from "~/stores";
 import { client } from "~/utils/ApiClient";
@@ -19,6 +19,22 @@ const mocks = vi.hoisted(() => ({
   save: vi.fn(() => ({ opaqueSnapshot: true })),
   dispose: vi.fn(),
   beforeCommand: vi.fn(),
+  sheetEditEnded: (_params: {
+    worksheet: {
+      getSheetName: () => string;
+      getRange: (
+        row: number,
+        column: number
+      ) => {
+        setWrapStrategy: (strategy: WrapStrategy) => unknown;
+        setVerticalAlignment: (alignment: string) => unknown;
+        setHorizontalAlignment: (alignment: string) => unknown;
+      };
+    };
+    row: number;
+    column: number;
+    isConfirm: boolean;
+  }) => {},
   user: true,
   update: true,
 }));
@@ -46,8 +62,16 @@ vi.mock("@univerjs/presets", () => ({
           },
           getActiveSheet: () => ({ getZoom: () => 1, zoom: vi.fn() }),
         }),
-        addEvent: () => ({ dispose: vi.fn() }),
-        Event: {},
+        addEvent: (event: string, callback: typeof mocks.sheetEditEnded) => {
+          if (event === "SheetEditEnded") {
+            mocks.sheetEditEnded = callback;
+          }
+          return { dispose: vi.fn() };
+        },
+        Event: {
+          SheetEditStarted: "SheetEditStarted",
+          SheetEditEnded: "SheetEditEnded",
+        },
       },
     };
   },
@@ -249,6 +273,34 @@ describe("table document management integration", () => {
     await act(async () => tableSaves.flush());
     expect(mocks.endEditingAsync).toHaveBeenCalledWith(true);
     expect(client.post).toHaveBeenCalled();
+  });
+
+  it("restores Wrap on the live daily work cell after editing", async () => {
+    await render();
+    const setWrapStrategy = vi.fn();
+    const setVerticalAlignment = vi.fn();
+    const setHorizontalAlignment = vi.fn();
+
+    mocks.sheetEditEnded({
+      worksheet: {
+        getSheetName: () => "日报",
+        getRange: (row, column) => {
+          expect([row, column]).toEqual([3, 1]);
+          return {
+            setWrapStrategy,
+            setVerticalAlignment,
+            setHorizontalAlignment,
+          };
+        },
+      },
+      row: 3,
+      column: 1,
+      isConfirm: true,
+    });
+
+    expect(setWrapStrategy).toHaveBeenCalledWith(WrapStrategy.WRAP);
+    expect(setVerticalAlignment).toHaveBeenCalledWith("top");
+    expect(setHorizontalAlignment).toHaveBeenCalledWith("left");
   });
 
   it("does not mount the authenticated document menu on an anonymous share", async () => {
