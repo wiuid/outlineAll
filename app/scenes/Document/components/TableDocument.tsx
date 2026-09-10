@@ -92,12 +92,14 @@ const Workspace = styled.div`
   }
 `;
 
-const Frame = styled.div<{ $permissionReady: boolean }>`
+const Frame = styled.div<{ $permissionReady: boolean; $shared: boolean }>`
   height: 100%;
   width: 100%;
   position: relative;
   overflow: hidden;
   overscroll-behavior: none;
+  box-sizing: border-box;
+  padding-top: ${({ $shared }) => ($shared ? "36px" : "0")};
   pointer-events: ${({ $permissionReady }) =>
     $permissionReady ? "auto" : "none"};
 
@@ -266,7 +268,7 @@ const ErrorPanel = styled.pre`
   border-radius: 6px;
 `;
 
-type Props = { document: Document; readOnly: boolean };
+type Props = { document: Document; readOnly: boolean; isShared?: boolean };
 
 function formatError(error: unknown) {
   return error instanceof Error
@@ -274,7 +276,7 @@ function formatError(error: unknown) {
     : String(error);
 }
 
-function TableDocument({ document, readOnly }: Props) {
+function TableDocument({ document, readOnly, isShared = false }: Props) {
   const { ui, auth } = useStores();
   const can = usePolicy(document);
   const editable = !readOnly && Boolean(auth.user && can.update);
@@ -586,7 +588,7 @@ function TableDocument({ document, readOnly }: Props) {
     </Header>
   );
 
-  const menu = auth.user ? (
+  const menu = !isShared && auth.user ? (
     <TableActions $inMobileRibbon={inMobileRibbon}>
       <DocumentMenu
         document={document}
@@ -618,7 +620,7 @@ function TableDocument({ document, readOnly }: Props) {
         : header}
       {!inMobileRibbon && menu}
       {error && <ErrorPanel role="alert">{error}</ErrorPanel>}
-      <Frame ref={containerRef} $permissionReady={permissionReady} />
+      <Frame ref={containerRef} $permissionReady={permissionReady} $shared={isShared} />
     </Workspace>
   );
 }

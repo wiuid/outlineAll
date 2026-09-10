@@ -587,7 +587,13 @@ function DocumentScene(props: Props) {
       props.document.tableData !== null) &&
     !props.revision
   ) {
-    return <TableDocument document={props.document} readOnly={props.readOnly} />;
+    return (
+      <TableDocument
+        document={props.document}
+        readOnly={props.readOnly}
+        isShared={Boolean(props.shareId)}
+      />
+    );
   }
   return <RichDocumentScene {...props} />;
 }
