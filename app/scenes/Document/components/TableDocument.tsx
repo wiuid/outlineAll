@@ -15,6 +15,7 @@ import DocumentMenu from "~/menus/DocumentMenu";
 import usePolicy from "~/hooks/usePolicy";
 import { DebouncedTableSave, tableSaves } from "~/stores/TableSaveCoordinator";
 import { toast } from "sonner";
+import type { JSONValue } from "@shared/types";
 import type Document from "~/models/Document";
 import useMediaQuery from "~/hooks/useMediaQuery";
 import useStores from "~/hooks/useStores";
@@ -78,6 +79,51 @@ function getWorkbookData(saved: Record<string, unknown> | null) {
   }
   return snapshot;
 }
+
+type TableCellSnapshot = Record<string, JSONValue>;
+type TableSheetSnapshot = {
+  name?: string;
+  cellData?: Record<string, Record<string, TableCellSnapshot>>;
+  rowData?: Record<string, Record<string, JSONValue>>;
+};
+type TableDataSnapshot = {
+  styles?: Record<string, Record<string, JSONValue>>;
+  sheets?: Record<string, TableSheetSnapshot>;
+};
+
+export function normalizeDailyTableWrapping(
+  snapshot: TableDataSnapshot
+): TableDataSnapshot {
+  if (!snapshot.sheets) {
+    return snapshot;
+  }
+  const styles = snapshot.styles ?? (snapshot.styles = {});
+  const baseStyle = styles["daily-wrap"] ?? styles["77MOo9"] ?? {};
+  styles["daily-wrap"] = { ...baseStyle, tb: 3, vt: 1, ht: 1 };
+
+  Object.values(snapshot.sheets ?? {}).forEach((sheet) => {
+    if (sheet.name !== "日报") {
+      return;
+    }
+    const cells = sheet.cellData ?? {};
+    const rowData = sheet.rowData ?? (sheet.rowData = {});
+    Object.entries(cells).forEach(([rowIndex, row]) => {
+      const workCell = row["1"];
+      if (!workCell || typeof workCell.v !== "string") {
+        return;
+      }
+      workCell.s = "daily-wrap";
+      const lineCount = Math.max(1, workCell.v.split("\n").length);
+      rowData[rowIndex] = {
+        ...rowData[rowIndex],
+        h: Math.min(Math.max(24, lineCount * 20 + 8), 1200),
+      };
+    });
+  });
+
+  return snapshot;
+}
+
 
 const Workspace = styled.div`
   position: relative;
@@ -449,7 +495,7 @@ function TableDocument({ document, readOnly, isShared = false }: Props) {
         if (!editableRef.current) {
           throw new Error("Table is no longer editable");
         }
-        const tableData = workbook.save();
+        const tableData = normalizeDailyTableWrapping(workbook.save());
         await client.post(
           "/documents.update",
           {
