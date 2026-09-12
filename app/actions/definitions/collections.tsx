@@ -20,6 +20,7 @@ import {
   TrashIcon,
   UnstarredIcon,
   UnsubscribeIcon,
+  TableIcon,
 } from "outline-icons";
 import { toast } from "sonner";
 import Collection from "~/models/Collection";
@@ -549,6 +550,24 @@ export const createDocument = createInternalLinkAction({
       search,
       state: { sidebarContext },
     };
+  },
+});
+
+/** Creates a table in the collection selected in the menu. */
+export const createTable = createInternalLinkAction({
+  name: ({ t }) => t("New table"),
+  analyticsName: "New table",
+  section: ActiveCollectionSection,
+  icon: <TableIcon />,
+  keywords: "new create table spreadsheet workbook",
+  visible: createDocument.visible,
+  to: ({ getActiveModel, sidebarContext }) => {
+    const collection = getActiveModel(Collection);
+    const [pathname, search] = newDocumentPath(collection?.id, {
+      type: "table",
+    }).split("?");
+
+    return { pathname, search, state: { sidebarContext } };
   },
 });
 

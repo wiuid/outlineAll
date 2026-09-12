@@ -5,6 +5,7 @@ import {
   DocumentIcon,
   NewDocumentIcon,
   PlusIcon,
+  TableIcon,
 } from "outline-icons";
 import { v4 as uuidv4 } from "uuid";
 import Icon from "@shared/components/Icon";
@@ -23,6 +24,7 @@ import type Collection from "~/models/Collection";
 import type Document from "~/models/Document";
 import type Group from "~/models/Group";
 import type User from "~/models/User";
+import type { DocumentCreationType } from "~/types";
 
 /** A suggestion menu item that inserts a mention. */
 export interface MentionMenuItem extends MenuItem {
@@ -33,6 +35,7 @@ export interface MentionMenuItem extends MenuItem {
     label: string;
     actorId?: string;
     nested?: boolean;
+    creationType?: DocumentCreationType;
   };
 }
 
@@ -187,7 +190,7 @@ export function documentMentionItem(
 }
 
 /**
- * Builds the menu items that create a new document titled with the search term,
+ * Builds the menu items that create a document or table titled with the search term,
  * either at the root or nested under the document being edited.
  *
  * @param t The translation function.
@@ -243,6 +246,43 @@ export function createDocumentMentionItems(
         actorId,
         label: title,
         nested: true,
+      },
+    },
+    {
+      name: "link",
+      icon: <TableIcon />,
+      title,
+      section: DocumentsSection,
+      subtitle: t("Create a new table"),
+      visible,
+      priority: -3,
+      appendSpace: true,
+      attrs: {
+        id: uuidv4(),
+        type: MentionType.Document,
+        modelId: uuidv4(),
+        actorId,
+        label: title,
+        creationType: "table",
+      },
+    },
+    {
+      name: "link",
+      icon: <TableIcon />,
+      title,
+      section: DocumentsSection,
+      subtitle: t("Create a nested table"),
+      visible: visible && !!documentId,
+      priority: -4,
+      appendSpace: true,
+      attrs: {
+        id: uuidv4(),
+        type: MentionType.Document,
+        modelId: uuidv4(),
+        actorId,
+        label: title,
+        nested: true,
+        creationType: "table",
       },
     },
   ];

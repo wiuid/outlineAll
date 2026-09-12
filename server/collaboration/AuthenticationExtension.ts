@@ -9,9 +9,11 @@ import type {
 import { uniq } from "es-toolkit";
 import { AuthorizationChanged } from "@shared/collaboration/CloseEvents";
 import { toError } from "@shared/utils/error";
+import { getTableDocument } from "@shared/utils/tableDocument";
 import Logger from "@server/logging/Logger";
 import { trace } from "@server/logging/tracing";
 import Document from "@server/models/Document";
+import { DocumentHelper } from "@server/models/helpers/DocumentHelper";
 import GroupUser from "@server/models/GroupUser";
 import type User from "@server/models/User";
 import { can } from "@server/policies";
@@ -76,7 +78,9 @@ export default class AuthenticationExtension implements Extension {
     connection,
     token,
     documentName,
-  }: onAuthenticatePayload) {
+  }: Pick<onAuthenticatePayload, "token" | "documentName"> & {
+    connection: Pick<Connection, "readOnly">;
+  }) {
     // allows for different entity types to use this multiplayer provider later
     const [, documentId] = documentName.split(".");
 
@@ -95,7 +99,10 @@ export default class AuthenticationExtension implements Extension {
 
     // set document to read only for the current user, thus changes will not be
     // accepted and synced to other clients
-    if (!can(user, "update", document)) {
+    if (
+      !can(user, "update", document) ||
+      (document && getTableDocument(await DocumentHelper.toJSON(document)))
+    ) {
       connection.readOnly = true;
     }
 

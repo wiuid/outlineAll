@@ -6,6 +6,15 @@ import type {
 import { AuthorizationChanged } from "@shared/collaboration/CloseEvents";
 import { CollectionPermission } from "@shared/types";
 import { sleep } from "@shared/utils/timers";
+import {
+  tableToMarkdown,
+  type LightweightTable,
+} from "@shared/utils/lightweightTable";
+import {
+  tableDocumentToMarkdown,
+  UniverTableSchema,
+} from "@shared/utils/tableDocument";
+import { parser } from "@server/editor";
 import { UserMembership } from "@server/models";
 import type User from "@server/models/User";
 import RedisAdapter from "@server/storage/redis";
@@ -75,6 +84,47 @@ describe("AuthenticationExtension", () => {
   });
 
   afterEach(() => extension.onDestroy({} as onDestroyPayload));
+
+  it("allows Markdown collaboration but makes both table formats read only", async () => {
+    const user = await buildUser();
+    const table: LightweightTable = {
+      format: "outline-table",
+      version: 1,
+      columns: [{}],
+      rows: [{ cells: [{ value: 1 }] }],
+    };
+    const native = UniverTableSchema.parse({
+      format: "outline-table",
+      version: 2,
+      workbook: {
+        id: "book",
+        name: "Table",
+        appVersion: "0.25.1",
+        locale: "zhCN",
+        styles: {},
+        sheetOrder: ["sheet"],
+        sheets: { sheet: {} },
+      },
+    });
+    for (const [text, expected] of [
+      ["Markdown", false],
+      [tableToMarkdown(table), true],
+      [tableDocumentToMarkdown(native), true],
+    ] satisfies [string, boolean][]) {
+      const document = await buildDocument({
+        teamId: user.teamId,
+        userId: user.id,
+        content: parser.parse(text).toJSON(),
+      });
+      const connection = buildConnection(user);
+      await extension.onAuthenticate({
+        token: user.getCollaborationToken(),
+        documentName: `document.${document.id}`,
+        connection,
+      });
+      expect(connection.readOnly).toBe(expected);
+    }
+  });
 
   it("should disconnect when an invalidation is published", async () => {
     const { document, user } = await buildPrivateCollection();

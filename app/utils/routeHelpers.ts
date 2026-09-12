@@ -215,6 +215,7 @@ export function newDocumentPath(
   collectionId?: string | null,
   params: {
     templateId?: string;
+    type?: "table";
   } = {}
 ): string {
   const search = queryString.stringify(params);
@@ -228,12 +229,17 @@ export function newDocumentPath(
  * Returns the path to create a new document nested under a parent document.
  *
  * @param parentDocumentId an optional parent document to nest under.
+ * @param type the content to initialize, defaulting to a Markdown document.
  * @returns the path to the new nested document screen.
  */
-export function newNestedDocumentPath(parentDocumentId?: string): string {
-  const search = parentDocumentId
-    ? `?${queryString.stringify({ parentDocumentId })}`
-    : "";
+export function newNestedDocumentPath(
+  parentDocumentId?: string,
+  type?: "table"
+): string {
+  const search =
+    parentDocumentId || type
+      ? `?${queryString.stringify({ parentDocumentId, type })}`
+      : "";
 
   return `/doc/new${search}`;
 }
@@ -242,13 +248,14 @@ export function newNestedDocumentPath(parentDocumentId?: string): string {
  * Returns the path to create a new document as a sibling at a given index,
  * optionally within a collection or under a parent document.
  *
- * @param params the collection, parent document, and index for the new document.
+ * @param params the collection, parent, index and content type for the new document.
  * @returns the path to the new sibling document screen.
  */
 export function newSiblingDocumentPath(params: {
   collectionId?: string | null;
   parentDocumentId?: string;
   index: number;
+  type?: "table";
 }): string {
   const query: Record<string, string> = {
     index: String(params.index),
@@ -258,6 +265,9 @@ export function newSiblingDocumentPath(params: {
   }
   if (params.collectionId) {
     query.collectionId = params.collectionId;
+  }
+  if (params.type) {
+    query.type = params.type;
   }
 
   return `/doc/new?${queryString.stringify(query)}`;

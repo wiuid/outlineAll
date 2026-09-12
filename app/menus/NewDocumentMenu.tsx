@@ -1,35 +1,46 @@
 import { observer } from "mobx-react";
 import { PlusIcon } from "outline-icons";
 import { useTranslation } from "react-i18next";
-import { Link } from "react-router-dom";
 import Button from "~/components/Button";
-import Tooltip from "~/components/Tooltip";
+import type { SidebarContextType } from "~/components/Sidebar/components/SidebarContext";
 import useCurrentTeam from "~/hooks/useCurrentTeam";
 import usePolicy from "~/hooks/usePolicy";
-import { preloadEditor } from "~/routes/scenes";
+import { DocumentTypeMenu } from "~/menus/DocumentTypeMenu";
 import { newDocumentPath } from "~/utils/routeHelpers";
 
-function NewDocumentMenu() {
+interface Props {
+  collectionId?: string;
+  sidebarContext?: SidebarContextType;
+  neutral?: boolean;
+}
+
+/** Offers document and table creation in a collection or the user's drafts. */
+function NewDocumentMenu({ collectionId, sidebarContext, neutral }: Props) {
   const { t } = useTranslation();
   const team = useCurrentTeam();
-  const can = usePolicy(team);
+  const can = usePolicy(collectionId ?? team);
 
   if (!can.createDocument) {
     return null;
   }
 
   return (
-    <Tooltip content={t("New document")} shortcut="n" placement="bottom">
-      <Button
-        as={Link}
-        to={newDocumentPath()}
-        icon={<PlusIcon />}
-        onPointerEnter={preloadEditor}
-        onFocus={preloadEditor}
-      >
-        {t("New doc")}
+    <DocumentTypeMenu
+      documentPath={{
+        pathname: newDocumentPath(collectionId),
+        state: { sidebarContext },
+      }}
+      tablePath={{
+        pathname: newDocumentPath(collectionId),
+        search: "?type=table",
+        state: { sidebarContext },
+      }}
+      align="end"
+    >
+      <Button icon={<PlusIcon />} disclosure neutral={neutral}>
+        {t("Create")}
       </Button>
-    </Tooltip>
+    </DocumentTypeMenu>
   );
 }
 

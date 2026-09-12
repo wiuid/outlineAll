@@ -1,5 +1,11 @@
 import { CollectionPermission, DocumentPermission, Scope } from "@shared/types";
 import {
+  getLightweightTable,
+  tableToMarkdown,
+  type LightweightTable,
+} from "@shared/utils/lightweightTable";
+import { parser } from "@server/editor";
+import {
   buildUser,
   buildViewer,
   buildCollection,
@@ -603,6 +609,78 @@ describe("create_document", () => {
 });
 
 describe("update_document", () => {
+  it("reads and updates lightweight tables with revision protection", async () => {
+    const { user, accessToken } = await buildOAuthUser();
+    const table: LightweightTable = {
+      format: "outline-table",
+      version: 1,
+      columns: [{}],
+      rows: [{ cells: [{ value: "Original" }] }],
+    };
+    const document = await buildDocument({
+      userId: user.id,
+      teamId: user.teamId,
+      text: tableToMarkdown(table),
+    });
+    const read = await callMcpTool(server, accessToken, "fetch", {
+      resource: "document",
+      id: document.id,
+    });
+    expect(read?.result?.isError).toBeUndefined();
+    const metadata = JSON.parse(read?.result?.content?.[0]?.text ?? "{}");
+    const markdown = read?.result?.content?.[1]?.text ?? "";
+    expect(metadata.document.revision).toBe(document.revisionCount);
+    expect(getLightweightTable(parser.parse(markdown).toJSON())).toEqual(table);
+
+    const missingRevision = await callMcpTool(
+      server,
+      accessToken,
+      "update_document",
+      {
+        id: document.id,
+        text: "Unversioned replacement",
+      }
+    );
+    expect(missingRevision?.result?.isError).toBe(true);
+    expect(missingRevision?.result?.content?.[0]?.text).toContain(
+      "lastRevision is required"
+    );
+
+    const updatedTable: LightweightTable = {
+      ...table,
+      rows: [{ cells: [{ formula: "=SUM(A2:A3)", style: { bold: true } }] }],
+    };
+    const updated = await callMcpTool(server, accessToken, "update_document", {
+      id: document.id,
+      text: tableToMarkdown(updatedTable),
+      lastRevision: metadata.document.revision,
+    });
+    expect(updated?.result?.isError).toBeUndefined();
+    const result = JSON.parse(updated?.result?.content?.[0]?.text ?? "{}");
+    expect(result.success).toBe(true);
+    expect(result.revision).toBe(metadata.document.revision + 1);
+
+    const conflict = await callMcpTool(server, accessToken, "update_document", {
+      id: document.id,
+      title: "Not saved",
+      text: markdown,
+      lastRevision: metadata.document.revision,
+    });
+    expect(conflict?.result?.isError).toBe(true);
+    expect(conflict?.result?.content?.[0]?.text).toContain(
+      "modified since the provided revision"
+    );
+
+    const stored = await Document.findByPk(document.id, {
+      rejectOnEmpty: true,
+    });
+    expect(stored.title).toBe(document.title);
+    expect(stored.revisionCount).toBe(result.revision);
+    expect(getLightweightTable(stored.content ?? undefined)).toEqual(
+      updatedTable
+    );
+  });
+
   it("updates title and text", async () => {
     const { user, accessToken } = await buildOAuthUser();
     const collection = await buildCollection({

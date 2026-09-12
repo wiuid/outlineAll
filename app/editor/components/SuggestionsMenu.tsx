@@ -15,6 +15,7 @@ import type { MenuItem } from "@shared/editor/types";
 import { toastNotice } from "~/editor/toastNotice";
 import { s } from "@shared/styles";
 import { getEventFiles } from "@shared/utils/files";
+import { toError } from "@shared/utils/error";
 import { AttachmentValidation } from "@shared/validations";
 import {
   Drawer,
@@ -29,6 +30,7 @@ import {
 import { MouseSafeArea } from "~/components/MouseSafeArea";
 import Scrollable from "~/components/Scrollable";
 import useMobile from "~/hooks/useMobile";
+import { createDocumentLink } from "~/editor/createDocumentLink";
 import Logger from "~/utils/Logger";
 import { useEditor } from "./EditorContext";
 import Input from "./Input";
@@ -210,6 +212,7 @@ function SuggestionsMenu<T extends MenuItem>(props: Props<T>) {
   });
   const inputRef = React.useRef<HTMLInputElement>(null);
   const selectionRef = React.useRef<{ from: number; to: number } | null>(null);
+  const creationPending = React.useRef(false);
   const [insertItem, setInsertItem] = React.useState<
     MenuItem | EmbedDescriptor
   >();
@@ -298,8 +301,8 @@ function SuggestionsMenu<T extends MenuItem>(props: Props<T>) {
     setSubmenu(null);
   }, [props.search]);
 
-  const handleClearSearch = React.useCallback(() => {
-    const { state, dispatch } = view;
+  const getSearchRange = React.useCallback(() => {
+    const { state } = view;
     const selection =
       isMobile && selectionRef.current ? selectionRef.current : state.selection;
     const triggers = Array.isArray(props.trigger)
@@ -316,20 +319,27 @@ function SuggestionsMenu<T extends MenuItem>(props: Props<T>) {
       return;
     }
 
-    // clear search input
-    dispatch(
-      state.tr.insertText(
-        "",
-        Math.max(
-          0,
-          selection.from -
-            (props.search ?? "").length -
-            (trimTrigger ? triggerLength : 0)
-        ),
-        selection.to
-      )
-    );
+    return {
+      from: Math.max(
+        0,
+        selection.from -
+          (props.search ?? "").length -
+          (trimTrigger ? triggerLength : 0)
+      ),
+      to: selection.to,
+    };
   }, [props.search, props.trigger, view, isMobile]);
+
+  const handleClearSearch = React.useCallback(() => {
+    const range = getSearchRange();
+    if (!range) {
+      return;
+    }
+    const { from, to } = range;
+    if (from !== to) {
+      view.dispatch(view.state.tr.insertText("", from, to));
+    }
+  }, [getSearchRange, view]);
 
   const restoreSelection = React.useCallback(() => {
     if (!isMobile) {
@@ -379,7 +389,7 @@ function SuggestionsMenu<T extends MenuItem>(props: Props<T>) {
 
   const handleClickItem = React.useCallback(
     (item: MenuItem | EmbedDescriptor) => {
-      if (item.disabled) {
+      if (item.disabled || creationPending.current) {
         return;
       }
 
@@ -389,20 +399,40 @@ function SuggestionsMenu<T extends MenuItem>(props: Props<T>) {
 
       switch (item.name) {
         case "link": {
-          insertNode({
-            ...(item as MenuItem),
-            name: "mention",
-          });
-          const mention = attrs as
-            | { label?: string; modelId?: string; nested?: boolean }
-            | undefined;
-          void editorProps.onCreateLink?.(
-            {
-              title: mention?.label,
-              id: mention?.modelId,
-            },
-            !!mention?.nested
-          );
+          const onCreateLink = editorProps.onCreateLink;
+          if (!onCreateLink) {
+            return;
+          }
+          restoreSelection();
+          const range = getSearchRange();
+          if (!range) {
+            return;
+          }
+          const node = view.state.schema.nodes.mention.create(attrs);
+          props.onClose();
+          creationPending.current = true;
+          void createDocumentLink(view, {
+            ...range,
+            node,
+            appendSpace: "appendSpace" in item && item.appendSpace,
+            create: () =>
+              onCreateLink(
+                {
+                  title:
+                    typeof attrs?.label === "string" ? attrs.label : undefined,
+                  id:
+                    typeof attrs?.modelId === "string"
+                      ? attrs.modelId
+                      : undefined,
+                },
+                attrs?.nested === true,
+                attrs?.creationType === "table" ? "table" : "document"
+              ),
+          })
+            .catch((error) => toast.error(toError(error).message))
+            .finally(() => {
+              creationPending.current = false;
+            });
           return;
         }
         case "image":
@@ -423,7 +453,7 @@ function SuggestionsMenu<T extends MenuItem>(props: Props<T>) {
           insertNode(item);
       }
     },
-    [editorProps, props, insertNode]
+    [editorProps, props, insertNode, restoreSelection, getSearchRange, view]
   );
 
   const close = React.useCallback(() => {

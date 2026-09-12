@@ -6,7 +6,6 @@ import { toast } from "sonner";
 import styled from "styled-components";
 import { richExtensions } from "@shared/editor/nodes";
 import { s } from "@shared/styles";
-import { ProsemirrorDataHelper } from "@shared/utils/ProsemirrorDataHelper";
 import { CollectionValidation } from "@shared/validations";
 import type Collection from "~/models/Collection";
 import type Document from "~/models/Document";
@@ -18,7 +17,7 @@ import { withUIExtensions } from "~/editor/extensions";
 import useCurrentUser from "~/hooks/useCurrentUser";
 import usePolicy from "~/hooks/usePolicy";
 import useStores from "~/hooks/useStores";
-import type { Properties } from "~/types";
+import type { DocumentCreationType, Properties } from "~/types";
 import CodeWordBreak from "@shared/editor/extensions/CodeWordBreak";
 
 const extensions = [CodeWordBreak, ...withUIExtensions(richExtensions)];
@@ -67,17 +66,21 @@ function Overview({ collection, readOnly }: Props) {
     [childOffsetHeight]
   );
 
-  const onCreateLink = useCallback(
-    async (params: Properties<Document>) => {
-      const newDocument = await documents.create(
+  const handleCreateLink = useCallback(
+    async (
+      params: Properties<Document>,
+      _nested?: boolean,
+      type: DocumentCreationType = "document"
+    ) => {
+      const newDocument = await documents.createEmptyDocument(
         {
           collectionId: collection.id,
-          data: ProsemirrorDataHelper.getEmpty(),
           ...params,
         },
         {
           publish: true,
-        }
+        },
+        type
       );
 
       return newDocument.url;
@@ -97,7 +100,7 @@ function Overview({ collection, readOnly }: Props) {
               placeholder={`${t("Add a description")}…`}
               extensions={extensions}
               maxLength={CollectionValidation.maxDescriptionLength}
-              onCreateLink={onCreateLink}
+              onCreateLink={can.createDocument ? handleCreateLink : undefined}
               canUpdate={can.update}
               readOnly={!can.update || readOnly}
               userId={user?.id}

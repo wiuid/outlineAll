@@ -1,5 +1,5 @@
 import invariant from "invariant";
-import { compact, filter, omitBy, orderBy } from "es-toolkit/compat";
+import { compact, filter, omit, omitBy, orderBy } from "es-toolkit/compat";
 import {
   action,
   computed,
@@ -18,15 +18,21 @@ import type { Filter } from "@shared/helpers/FilterHelper";
 import { subtractDate } from "@shared/utils/date";
 import { bytesToHumanReadable } from "@shared/utils/files";
 import naturalSort from "@shared/utils/naturalSort";
+import { ProsemirrorDataHelper } from "@shared/utils/ProsemirrorDataHelper";
+import { tableDocumentToMarkdown } from "@shared/utils/tableDocument";
 import type RootStore from "~/stores/RootStore";
 import Store from "~/stores/base/Store";
 import Document from "~/models/Document";
+import type Policy from "~/models/Policy";
+import type { TableSaveRequest } from "./TableDocumentSession";
 import env from "~/env";
 import type {
   FetchOptions,
   PaginationParams,
   PartialExcept,
   SearchResult,
+  Properties,
+  DocumentCreationType,
 } from "~/types";
 import { client } from "~/utils/ApiClient";
 import { extname, uploadFile } from "~/utils/files";
@@ -91,6 +97,64 @@ export default class DocumentsStore extends Store<Document> {
   constructor(rootStore: RootStore) {
     super(rootStore, Document);
     makeObservable(this);
+  }
+
+  /**
+   * Creates an empty Markdown document or a native Univer workbook.
+   *
+   * @param params the title, destination and document preferences.
+   * @param options whether to publish and where to insert the document.
+   * @param type the content to initialize.
+   * @returns the created document with its server permissions.
+   * @throws {Error} if the creation request fails.
+   */
+  async createEmptyDocument(
+    params: Properties<Document>,
+    options: { publish?: boolean; index?: number } = {},
+    type: DocumentCreationType = "document"
+  ): Promise<Document> {
+    if (type === "document") {
+      return this.create(
+        { data: ProsemirrorDataHelper.getEmpty(), ...params },
+        options
+      );
+    }
+
+    const { createTableWorkbook, snapshotTable } =
+      await import("~/utils/tableWorkbook");
+    return this.create(
+      { ...omit(params, ["data", "templateId"]), fullWidth: true },
+      {
+        ...options,
+        text: tableDocumentToMarkdown(
+          snapshotTable(createTableWorkbook(params.title ?? ""))
+        ),
+      }
+    );
+  }
+
+  /**
+   * Saves a native table against the revision captured by its editing session.
+   *
+   * @param id the table document identifier.
+   * @param request the complete content and its base revision.
+   * @returns the acknowledged revision directly from the server response.
+   * @throws {Error} if validation, authorization or the revision check fails.
+   */
+  async updateTable(id: string, request: TableSaveRequest): Promise<number> {
+    const response = await client.post<{
+      data: Properties<Document> & { id: string; revision: number };
+      policies: Policy[];
+    }>(
+      "/documents.update",
+      { id, ...request },
+      { tableSave: true, retry: false }
+    );
+    runInAction(() => {
+      this.addPolicies(response.policies);
+      this.add(response.data);
+    });
+    return response.data.revision;
   }
 
   @computed

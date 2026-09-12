@@ -25,6 +25,7 @@ import useRequest from "~/hooks/useRequest";
 import useStores from "~/hooks/useStores";
 import { MenuSeparator } from "~/components/primitives/components/Menu";
 import { useDocumentMenuAction } from "~/hooks/useDocumentMenuAction";
+import type { ActionFactory } from "~/types";
 
 type Props = {
   /** Document for which the menu is to be shown */
@@ -33,6 +34,12 @@ type Props = {
   align?: "start" | "end";
   /** Trigger's variant - renders nude variant if unset */
   neutral?: boolean;
+  /** Optional action profile for a specialized document editor. */
+  action?: ActionFactory;
+  /** Content above the menu actions, such as a table's save status. */
+  prepend?: React.ReactNode;
+  /** Accessible menu label, defaults to document options. */
+  ariaLabel?: string;
   /** Pass true if the document is currently being displayed */
   showDisplayOptions?: boolean;
   /** Whether to include the option of toggling embeds as menu item */
@@ -53,6 +60,9 @@ function DocumentMenu({
   document,
   align,
   neutral,
+  action,
+  prepend,
+  ariaLabel,
   showToggleEmbeds,
   showDisplayOptions,
   onSelectTemplate,
@@ -202,11 +212,12 @@ function DocumentMenu({
   return (
     <ActionContextProvider value={{ activeModels }}>
       <DropdownMenu
-        action={rootAction}
+        action={action ?? rootAction}
         align={align}
         onOpen={onOpen}
         onClose={onClose}
-        ariaLabel={t("Document options")}
+        ariaLabel={ariaLabel ?? t("Document options")}
+        prepend={prepend}
         append={toggleSwitches}
       >
         <OverflowMenuButton

@@ -62,7 +62,7 @@ import { AttachmentValidation } from "@shared/validations";
 import type Document from "~/models/Document";
 import Flex from "~/components/Flex";
 import { PortalContext } from "~/components/Portal";
-import type { Properties } from "~/types";
+import type { DocumentCreationType, Properties } from "~/types";
 import Logger from "~/utils/Logger";
 import ComponentView from "./components/ComponentView";
 import EditorContext from "./components/EditorContext";
@@ -166,7 +166,8 @@ export type Props = {
   /** Callback when a link is created, should return url to created document */
   onCreateLink?: (
     params: Properties<Document>,
-    nested?: boolean
+    nested?: boolean,
+    type?: DocumentCreationType
   ) => Promise<string>;
   /** Callback when user clicks on any link in the document */
   onClickLink: (

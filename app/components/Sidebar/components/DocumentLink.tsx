@@ -8,7 +8,6 @@ import scrollIntoView from "scroll-into-view-if-needed";
 import Icon from "@shared/components/Icon";
 import type { NavigationNode } from "@shared/types";
 import { DocumentPermission, UserPreference } from "@shared/types";
-import { ProsemirrorDataHelper } from "@shared/utils/ProsemirrorDataHelper";
 import { sortNavigationNodes } from "@shared/utils/collections";
 import type Collection from "~/models/Collection";
 import type Document from "~/models/Document";
@@ -25,6 +24,7 @@ import usePolicy from "~/hooks/usePolicy";
 import useStores from "~/hooks/useStores";
 import DocumentMenu from "~/menus/DocumentMenu";
 import * as Scenes from "~/routes/scenes";
+import type { DocumentCreationType } from "~/types";
 import { documentEditPath } from "~/utils/routeHelpers";
 import {
   useDragDocument,
@@ -365,8 +365,8 @@ const DocumentLinkInner = observer(function DocumentLinkInner({
   const title = document?.title || node.title || t("Untitled");
 
   const handleNewDoc = React.useCallback(
-    async (input: string) => {
-      const newDocument = await documents.create(
+    async (input: string, type: DocumentCreationType) => {
+      const newDocument = await documents.createEmptyDocument(
         {
           collectionId: collection?.id,
           parentDocumentId: node.id,
@@ -374,9 +374,9 @@ const DocumentLinkInner = observer(function DocumentLinkInner({
             document?.fullWidth ??
             user.getPreference(UserPreference.FullWidthDocuments),
           title: input,
-          data: ProsemirrorDataHelper.getEmpty(),
         },
-        { publish: true }
+        { publish: true },
+        type
       );
       collection?.addDocument(newDocument, node.id);
       membership?.addDocument(newDocument, node.id);

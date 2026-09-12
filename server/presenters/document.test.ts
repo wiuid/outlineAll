@@ -1,3 +1,7 @@
+import {
+  tableToMarkdown,
+  type LightweightTable,
+} from "@shared/utils/lightweightTable";
 import { Document } from "@server/models";
 import { presentDocuments } from "@server/presenters/document";
 import {
@@ -9,6 +13,27 @@ import { withAPIContext } from "@server/test/support";
 import { sequelize } from "@server/storage/database";
 
 describe("presentDocuments", () => {
+  it("omits canonical table data when document content is excluded", async () => {
+    const table: LightweightTable = {
+      format: "outline-table",
+      version: 1,
+      columns: [{}],
+      rows: [{ cells: [{ value: "Private content" }] }],
+    };
+    const created = await buildDocument({ text: tableToMarkdown(table) });
+    const document = await Document.findByPk(created.id, {
+      rejectOnEmpty: true,
+    });
+    const [summary] = await presentDocuments(undefined, [document], {
+      includeData: false,
+    });
+
+    expect(summary.table).toBeUndefined();
+    expect(summary.data).toBeUndefined();
+    expect(summary.text).toBeUndefined();
+    expect(summary.revision).toBe(document.revisionCount);
+  });
+
   describe("deletedBy", () => {
     it("should resolve the deleting user in a single query", async () => {
       const user = await buildUser();

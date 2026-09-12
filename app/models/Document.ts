@@ -27,6 +27,7 @@ import { DocumentPreferenceDefaults } from "@shared/constants";
 import Storage from "@shared/utils/Storage";
 import { isRTL } from "@shared/utils/rtl";
 import slugify from "@shared/utils/slugify";
+import { getTableDocument } from "@shared/utils/tableDocument";
 import type DocumentsStore from "~/stores/DocumentsStore";
 import User from "~/models/User";
 import type { Properties } from "~/types";
@@ -75,6 +76,12 @@ export default class Document extends ArchivableModel implements Searchable {
 
   @observable.shallow
   data: ProsemirrorData;
+
+  /** The structured workbook represented by this document's Markdown content. */
+  @computed
+  get tableContent() {
+    return getTableDocument(this.data);
+  }
 
   /**
    * The original data source of the document, if imported.

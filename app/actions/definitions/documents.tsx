@@ -40,6 +40,7 @@ import {
   ExportIcon,
   CodeIcon,
   PDFIcon,
+  TableIcon,
 } from "outline-icons";
 import { toast } from "sonner";
 import Icon from "@shared/components/Icon";
@@ -109,6 +110,7 @@ import type {
   Action,
   ActionContext,
   ActionGroup,
+  DocumentCreationType,
   ActionSeparator as TActionSeparator,
 } from "~/types";
 import lazyWithRetry from "~/utils/lazyWithRetry";
@@ -244,6 +246,37 @@ export const createDraftDocument = createInternalLinkAction({
   }),
 });
 
+/** Creates a native table in the active collection or the user's drafts. */
+export const createTableDocument = createInternalLinkAction({
+  name: ({ t }) => t("New table"),
+  analyticsName: "New table",
+  section: DocumentSection,
+  icon: <TableIcon />,
+  keywords: "create spreadsheet workbook 表格",
+  visible: createDocument.visible,
+  to: ({ activeCollectionId, sidebarContext }) => {
+    const [pathname, search] = newDocumentPath(activeCollectionId, {
+      type: "table",
+    }).split("?");
+    return { pathname, search, state: { sidebarContext } };
+  },
+});
+
+/** Creates a native table in the user's drafts. */
+export const createDraftTable = createInternalLinkAction({
+  name: ({ t }) => t("New table draft"),
+  analyticsName: "New table",
+  section: DocumentSection,
+  icon: <TableIcon />,
+  keywords: "create table spreadsheet workbook draft",
+  visible: createDraftDocument.visible,
+  to: ({ sidebarContext }) => ({
+    pathname: newDocumentPath(),
+    search: "?type=table",
+    state: { sidebarContext },
+  }),
+});
+
 /**
  * Finds the index of a document among its siblings in the collection tree.
  *
@@ -320,89 +353,73 @@ export const createNestedDocument = createInternalLinkAction({
   },
 });
 
-const createDocumentBefore = createInternalLinkAction({
-  name: ({ t }) => t("Before"),
-  analyticsName: "New document before",
+/** Creates a table nested under the active document. */
+export const createNestedTable = createInternalLinkAction({
+  name: ({ t }) => t("Nested table"),
+  analyticsName: "New table",
   section: ActiveDocumentSection,
-  keywords: "create before",
-  visible: ({ currentTeamId, activeDocumentId, stores }) => {
-    if (!currentTeamId || !activeDocumentId) {
-      return false;
-    }
-    const document = stores.documents.get(activeDocumentId);
-    if (!document?.collectionId) {
-      return false;
-    }
-    const collection = stores.collections.get(document.collectionId);
-    if (collection?.sort.field === "title") {
-      return false;
-    }
-    return canCreateSiblingDocument(stores, document);
-  },
-  to: ({ activeDocumentId, stores, sidebarContext }) => {
-    const document = activeDocumentId
-      ? stores.documents.get(activeDocumentId)
-      : undefined;
-    if (!document) {
-      return "";
-    }
-
-    const index = findDocumentSiblingIndex(stores, document);
-    const [pathname, search] = newSiblingDocumentPath({
-      collectionId: document.collectionId,
-      parentDocumentId: document.parentDocumentId,
-      index: Math.max(0, index),
-    }).split("?");
-
-    return {
-      pathname,
-      search,
-      state: { sidebarContext },
-    };
+  icon: <TableIcon />,
+  keywords: "create nested table spreadsheet workbook",
+  visible: createNestedDocument.visible,
+  to: ({ activeDocumentId, sidebarContext }) => {
+    const [pathname, search] = newNestedDocumentPath(
+      activeDocumentId,
+      "table"
+    ).split("?");
+    return { pathname, search, state: { sidebarContext } };
   },
 });
 
-const createDocumentAfter = createInternalLinkAction({
-  name: ({ t }) => t("After"),
-  analyticsName: "New document after",
-  section: ActiveDocumentSection,
-  keywords: "create after",
-  visible: ({ currentTeamId, activeDocumentId, stores }) => {
-    if (!currentTeamId || !activeDocumentId) {
-      return false;
-    }
-    const document = stores.documents.get(activeDocumentId);
-    if (!document?.collectionId) {
-      return false;
-    }
-    const collection = stores.collections.get(document.collectionId);
-    if (collection?.sort.field === "title") {
-      return false;
-    }
-    return canCreateSiblingDocument(stores, document);
-  },
-  to: ({ activeDocumentId, stores, sidebarContext }) => {
-    const document = activeDocumentId
-      ? stores.documents.get(activeDocumentId)
-      : undefined;
-    if (!document) {
-      return "";
-    }
+/** Builds sibling creation actions with identical placement and permissions. */
+function createSiblingDocumentAction(
+  type: DocumentCreationType,
+  position: "before" | "after"
+) {
+  const isBefore = position === "before";
+  return createInternalLinkAction({
+    name: ({ t }) => (isBefore ? t("Before") : t("After")),
+    analyticsName: `New ${type} ${position}`,
+    section: ActiveDocumentSection,
+    keywords: `create ${type} ${position}`,
+    visible: ({ currentTeamId, activeDocumentId, stores }) => {
+      if (!currentTeamId || !activeDocumentId) {
+        return false;
+      }
+      const document = stores.documents.get(activeDocumentId);
+      if (!document?.collectionId) {
+        return false;
+      }
+      const collection = stores.collections.get(document.collectionId);
+      if (collection?.sort.field === "title") {
+        return false;
+      }
+      return canCreateSiblingDocument(stores, document);
+    },
+    to: ({ activeDocumentId, stores, sidebarContext }) => {
+      const document = activeDocumentId
+        ? stores.documents.get(activeDocumentId)
+        : undefined;
+      if (!document) {
+        return "";
+      }
 
-    const index = findDocumentSiblingIndex(stores, document);
-    const [pathname, search] = newSiblingDocumentPath({
-      collectionId: document.collectionId,
-      parentDocumentId: document.parentDocumentId,
-      index: index + 1,
-    }).split("?");
+      const index = findDocumentSiblingIndex(stores, document);
+      const [pathname, search] = newSiblingDocumentPath({
+        collectionId: document.collectionId,
+        parentDocumentId: document.parentDocumentId,
+        index: isBefore ? Math.max(0, index) : index + 1,
+        type: type === "table" ? "table" : undefined,
+      }).split("?");
 
-    return {
-      pathname,
-      search,
-      state: { sidebarContext },
-    };
-  },
-});
+      return { pathname, search, state: { sidebarContext } };
+    },
+  });
+}
+
+const createDocumentBefore = createSiblingDocumentAction("document", "before");
+const createDocumentAfter = createSiblingDocumentAction("document", "after");
+const createTableBefore = createSiblingDocumentAction("table", "before");
+const createTableAfter = createSiblingDocumentAction("table", "after");
 
 function isAlphabeticallySorted(
   stores: ActionContext["stores"],
@@ -467,6 +484,28 @@ export const createNewDocumentInAlphabeticalCollection =
       };
     },
   });
+
+/** Offers the same sibling and nested destinations for tables as documents. */
+export const createNewTable = createActionWithChildren({
+  name: ({ t }) => t("New table"),
+  analyticsName: "New table",
+  section: ActiveDocumentSection,
+  icon: <TableIcon />,
+  keywords: "create table spreadsheet workbook",
+  visible: createNewDocument.visible,
+  children: [createTableBefore, createTableAfter, createNestedTable],
+});
+
+/** Offers nested table creation when collection order is alphabetical. */
+export const createNewTableInAlphabeticalCollection = createInternalLinkAction({
+  name: ({ t }) => t("New table"),
+  analyticsName: "New table",
+  section: ActiveDocumentSection,
+  icon: <TableIcon />,
+  keywords: "create table spreadsheet workbook",
+  visible: createNewDocumentInAlphabeticalCollection.visible,
+  to: createNestedTable.to,
+});
 
 export const starDocument = createAction({
   name: ({ t }) => t("Star"),
@@ -1928,10 +1967,15 @@ export const rootDocumentActions = [
   openDocument,
   archiveDocument,
   createDocument,
+  createTableDocument,
   createDraftDocument,
+  createDraftTable,
   createNewDocument,
   createNewDocumentInAlphabeticalCollection,
+  createNewTable,
+  createNewTableInAlphabeticalCollection,
   createNestedDocument,
+  createNestedTable,
   createTemplateFromDocument,
   deleteDocument,
   importDocument,

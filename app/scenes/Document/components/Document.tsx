@@ -23,7 +23,7 @@ import PlaceholderDocument from "~/components/PlaceholderDocument";
 import RegisterKeyDown from "~/components/RegisterKeyDown";
 import { MeasuredContainer } from "~/components/MeasuredContainer";
 import type { Editor as TEditor } from "~/editor";
-import type { Properties } from "~/types";
+import type { DocumentCreationType, Properties } from "~/types";
 import { useLocationSidebarContext } from "~/hooks/useLocationSidebarContext";
 import useStores from "~/hooks/useStores";
 import isTextInput from "~/utils/isTextInput";
@@ -64,14 +64,36 @@ interface Props {
   /** Callback to create a linked document from the editor. */
   onCreateLink?: (
     params: Properties<Document>,
-    nested?: boolean
+    nested?: boolean,
+    type?: DocumentCreationType
   ) => Promise<string>;
   /** Optional children rendered after the main document content. */
   children?: React.ReactNode;
 }
 
+const TableDocument = React.lazy(() =>
+  import("./TableDocument").then((module) => ({
+    default: module.TableDocument,
+  }))
+);
+
+/** Selects the native table or Markdown editor before either save lifecycle mounts. */
+function DocumentScene(props: Props) {
+  const table = props.document.tableContent;
+  if (table && !props.revision) {
+    return (
+      <ErrorBoundary>
+        <React.Suspense fallback={<PlaceholderDocument />}>
+          <TableDocument key={props.document.id} {...props} table={table} />
+        </React.Suspense>
+      </ErrorBoundary>
+    );
+  }
+  return <ObservedMarkdownDocumentScene {...props} />;
+}
+
 /** Scene component responsible for rendering and interacting with a document. */
-function DocumentScene({
+function MarkdownDocumentScene({
   document,
   revision,
   readOnly,
@@ -579,5 +601,7 @@ const ReferencesWrapper = styled.div`
     display: none;
   }
 `;
+
+const ObservedMarkdownDocumentScene = observer(MarkdownDocumentScene);
 
 export default observer(DocumentScene);

@@ -4,9 +4,12 @@ import { Node } from "prosemirror-model";
 import { yDocToProsemirrorJSON } from "y-prosemirror";
 import * as Y from "yjs";
 import type { ProsemirrorData } from "@shared/types";
+import { getTableDocument } from "@shared/utils/tableDocument";
 import { schema } from "@server/editor";
+import { DocumentConflictError } from "@server/errors";
 import Logger from "@server/logging/Logger";
 import { Document, Event } from "@server/models";
+import { DocumentHelper } from "@server/models/helpers/DocumentHelper";
 import { sequelize } from "@server/storage/database";
 import { AuthenticationType } from "@server/types";
 import semver from "semver";
@@ -72,6 +75,16 @@ export default async function documentCollaborativeUpdater({
 
     if (isUnchanged) {
       return;
+    }
+
+    // An already-connected Markdown client may outlive conversion to a table.
+    // Check while holding the same row lock used by API updates: tables may only
+    // be replaced through the API with the revision they were edited against.
+    if (
+      getTableDocument(await DocumentHelper.toJSON(document)) ||
+      getTableDocument(content)
+    ) {
+      throw DocumentConflictError();
     }
 
     Logger.info(

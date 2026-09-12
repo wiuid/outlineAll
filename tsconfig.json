@@ -37,7 +37,33 @@
       // Vite 8 and its plugins ship types only via their exports map, which
       // resolvePackageJsonExports disables; point tsc at their declaration entries.
       "vite": ["./node_modules/vite/dist/node/index.d.ts"],
-      "@vitejs/plugin-react": ["./node_modules/@vitejs/plugin-react/dist/index.d.ts"]
+      "@vitejs/plugin-react": [
+        "./node_modules/@vitejs/plugin-react/dist/index.d.ts"
+      ],
+      // Univer presets expose declarations and facade augmentations via exports.
+      "@univerjs/presets": [
+        "./node_modules/@univerjs/presets/lib/types/index.d.ts"
+      ],
+      "@univerjs/preset-sheets-core": [
+        "./node_modules/@univerjs/preset-sheets-core/lib/types/index.d.ts"
+      ],
+      "@univerjs/preset-sheets-node-core": [
+        "./node_modules/@univerjs/preset-sheets-node-core/lib/types/index.d.ts"
+      ],
+      // Univer's injection hooks also expose their types through exports.
+      "@wendellhu/redi": ["./node_modules/@wendellhu/redi/dist/esm/index.d.ts"],
+      "@wendellhu/redi/react-bindings": [
+        "./node_modules/@wendellhu/redi/dist/esm/react-bindings/index.d.ts"
+      ],
+      "@univerjs/preset-sheets-core/locales/*": [
+        "./node_modules/@univerjs/preset-sheets-core/lib/types/locales/*"
+      ],
+      "@univerjs/*/lib/facade": [
+        "./node_modules/@univerjs/*/lib/types/facade/index.d.ts"
+      ],
+      "@univerjs/*/facade": [
+        "./node_modules/@univerjs/*/lib/types/facade/index.d.ts"
+      ]
     }
   },
   "exclude": ["node_modules", "build", "server/migrations"]

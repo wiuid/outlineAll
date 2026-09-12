@@ -3,7 +3,6 @@ import * as React from "react";
 import type { RouteComponentProps, StaticContext } from "react-router";
 import { Redirect, useLocation } from "react-router";
 import { toError } from "@shared/utils/error";
-import { ProsemirrorDataHelper } from "@shared/utils/ProsemirrorDataHelper";
 import { RevisionHelper } from "@shared/utils/RevisionHelper";
 import type Document from "~/models/Document";
 import type Revision from "~/models/Revision";
@@ -19,7 +18,7 @@ import useCurrentUser from "~/hooks/useCurrentUser";
 import usePolicy from "~/hooks/usePolicy";
 import useQuery from "~/hooks/useQuery";
 import useStores from "~/hooks/useStores";
-import type { Properties } from "~/types";
+import type { DocumentCreationType, Properties } from "~/types";
 import Logger from "~/utils/Logger";
 import {
   AuthorizationError,
@@ -58,7 +57,8 @@ type Children = (options: {
   readOnly: boolean;
   onCreateLink: (
     params: Properties<Document>,
-    nested?: boolean
+    nested?: boolean,
+    type?: DocumentCreationType
   ) => Promise<string>;
 }) => React.ReactNode;
 
@@ -171,22 +171,26 @@ function DataLoader({ match, children }: Props) {
     void fetchViews();
   }, [document?.id, document?.isDeleted, revisionId, views, isJustCreated]);
 
-  const onCreateLink = React.useCallback(
-    async (params: Properties<Document>, nested?: boolean) => {
+  const handleCreateLink = React.useCallback(
+    async (
+      params: Properties<Document>,
+      nested?: boolean,
+      type: DocumentCreationType = "document"
+    ) => {
       if (!document) {
         throw new Error("Document not loaded yet");
       }
 
-      const newDocument = await documents.create(
+      const newDocument = await documents.createEmptyDocument(
         {
           collectionId: nested ? undefined : document.collectionId,
           parentDocumentId: nested ? document.id : document.parentDocumentId,
-          data: ProsemirrorDataHelper.getEmpty(),
           ...params,
         },
         {
           publish: document.isDraft ? undefined : true,
-        }
+        },
+        type
       );
 
       return newDocument.url;
@@ -302,7 +306,7 @@ function DataLoader({ match, children }: Props) {
           revision,
           abilities: can,
           readOnly,
-          onCreateLink,
+          onCreateLink: handleCreateLink,
         })}
       </React.Fragment>
     </>

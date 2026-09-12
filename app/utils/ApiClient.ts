@@ -13,6 +13,7 @@ import {
   BadGatewayError,
   BadRequestError,
   ClientClosedRequestError,
+  DocumentConflictError,
   NetworkError,
   NotFoundError,
   OfflineError,
@@ -26,6 +27,7 @@ import {
 import { BatchableApiMethods, BatchMaxRequests, CSRF } from "@shared/constants";
 import { getCSRFToken } from "./csrf";
 import AuthenticationHelper from "@shared/helpers/AuthenticationHelper";
+import { tableSaves } from "~/stores/TableSaveCoordinator";
 
 type Options = {
   baseUrl?: string;
@@ -48,6 +50,8 @@ export type UnauthorizedReason = "unauthorized" | "user_suspended";
 type UnauthorizedHandler = (reason: UnauthorizedReason) => void | Promise<void>;
 
 interface FetchOptions {
+  /** The coordinated table save itself must not recursively flush editors. */
+  tableSave?: boolean;
   download?: boolean;
   retry?: boolean;
   credentials?: "omit" | "same-origin" | "include";
@@ -135,6 +139,40 @@ class ApiClient {
     data: JSONObject | FormData | undefined,
     options: FetchOptions = {}
   ): Promise<T> => {
+    const action = path.replace(/^\//, "");
+    if (!options.tableSave) {
+      if (
+        action === "documents.update" &&
+        data &&
+        !(data instanceof FormData) &&
+        typeof data.id === "string"
+      ) {
+        const payload = data;
+        if (payload.text === undefined && payload.table === undefined) {
+          return tableSaves.updateMetadata(data.id, (revision) =>
+            this.fetch<T>(
+              path,
+              method,
+              {
+                ...payload,
+                ...(revision !== undefined &&
+                  payload.lastRevision === undefined && {
+                    lastRevision: revision,
+                  }),
+              },
+              { ...options, tableSave: true }
+            )
+          );
+        }
+        await tableSaves.flush(data.id);
+      } else if (
+        /^(documents\.(export|duplicate|move|archive|delete|restore)|collections\.(export|delete))$/.test(
+          action
+        )
+      ) {
+        await tableSaves.flush();
+      }
+    }
     let body: string | FormData | undefined;
     let modifiedPath: string | undefined;
     let urlToFetch: string;
@@ -362,6 +400,10 @@ class ApiClient {
 
     if (status === 404) {
       return new NotFoundError(message);
+    }
+
+    if (status === 409 && code === "document_conflict") {
+      return new DocumentConflictError(message);
     }
 
     if (status === 503) {

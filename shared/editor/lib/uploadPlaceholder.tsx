@@ -12,13 +12,20 @@ const uploadPlaceholder = new Plugin({
       return DecorationSet.empty;
     },
     apply(this: Plugin, tr, set: DecorationSet, _oldState, newState) {
-      // See if the transaction adds or removes any placeholders – the placeholder display is
-      // different depending on if we're uploading an image, video or plain file
+      // Track pending inline content and placeholders for file uploads.
       const action = tr.getMeta(this);
       set = mapDecorations(set, tr, newState, !!action);
 
       if (action?.add) {
-        if (action.add.replaceExisting) {
+        if (action.add.inline) {
+          const deco = Decoration.inline(
+            action.add.from,
+            action.add.to,
+            { "aria-busy": "true" },
+            { id: action.add.id }
+          );
+          set = set.add(tr.doc, [deco]);
+        } else if (action.add.replaceExisting) {
           const $pos = tr.doc.resolve(action.add.pos);
           const nodeAfter = $pos.nodeAfter;
           if (!nodeAfter) {

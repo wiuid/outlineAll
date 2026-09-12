@@ -19,6 +19,7 @@ import type { SidebarContextType } from "~/components/Sidebar/components/Sidebar
 import { ActionContextProvider } from "~/hooks/useActionContext";
 import { useDocumentMenuAction } from "~/hooks/useDocumentMenuAction";
 import DocumentMenu from "~/menus/DocumentMenu";
+import { DocumentTypeMenu } from "~/menus/DocumentTypeMenu";
 import { newNestedDocumentPath, sharedModelPath } from "~/utils/routeHelpers";
 import useBoolean from "~/hooks/useBoolean";
 import useClickIntent from "~/hooks/useClickIntent";
@@ -39,12 +40,11 @@ type NewChildProps = {
 };
 
 /**
- * A list item that starts the creation of a new document nested under the given
- * parent document.
+ * A list item that offers document and table creation under the given parent.
  *
  * @param parentDocumentId - the identifier of the parent document.
  * @param sidebarContext - the sidebar context to keep after navigation.
- * @returns a list item linking to the new document screen.
+ * @returns a list item with a creation menu.
  */
 export function NewChildReferenceListItem({
   parentDocumentId,
@@ -52,21 +52,32 @@ export function NewChildReferenceListItem({
 }: NewChildProps) {
   const { t } = useTranslation();
   const [pathname, search] = newNestedDocumentPath(parentDocumentId).split("?");
+  const [tablePathname, tableSearch] = newNestedDocumentPath(
+    parentDocumentId,
+    "table"
+  ).split("?");
 
   return (
     <li>
-      <DocumentLink
-        to={{
+      <DocumentTypeMenu
+        documentPath={{
           pathname,
           search,
           state: { sidebarContext },
         }}
+        tablePath={{
+          pathname: tablePathname,
+          search: tableSearch,
+          state: { sidebarContext },
+        }}
       >
-        <Content gap={4} dir="auto">
-          <PlusIcon />
-          <SecondaryTitle>{t("New doc")}</SecondaryTitle>
-        </Content>
-      </DocumentLink>
+        <DocumentLink as="button" type="button">
+          <Content gap={4} dir="auto">
+            <PlusIcon />
+            <SecondaryTitle>{t("Create")}</SecondaryTitle>
+          </Content>
+        </DocumentLink>
+      </DocumentTypeMenu>
     </li>
   );
 }
@@ -99,6 +110,12 @@ const DocumentLink = styled(Link)<{ $menuOpen?: boolean }>`
   overflow: hidden;
   position: relative;
   cursor: var(--pointer);
+
+  &:is(button) {
+    border: 0;
+    background: transparent;
+    text-align: start;
+  }
 
   ${Actions} {
     opacity: 0;

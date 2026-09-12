@@ -1,4 +1,5 @@
 import { Op } from "sequelize";
+import { getTableDocument } from "@shared/utils/tableDocument";
 import { Hour } from "@shared/utils/time";
 import { traceFunction } from "@server/logging/tracing";
 import type { Document } from "@server/models";
@@ -67,6 +68,7 @@ async function presentDocument(
           ? data
           : undefined,
     text,
+    table: options?.includeData === false ? undefined : getTableDocument(data),
     icon: document.icon,
     color: document.color,
     tasks: {

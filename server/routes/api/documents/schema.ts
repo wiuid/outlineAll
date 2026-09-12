@@ -11,6 +11,10 @@ import {
   SortFilter,
 } from "@shared/types";
 import { DocumentValidation } from "@shared/validations";
+import {
+  TableDocumentSchema,
+  tableDocumentToMarkdown,
+} from "@shared/utils/tableDocument";
 import { BaseSchema } from "@server/routes/api/schema";
 import { zodIconType, zodIdType, zodShareIdType } from "@server/utils/zod";
 import { ValidateColor } from "@server/validation";
@@ -386,6 +390,9 @@ export const DocumentsUpdateSchema = BaseSchema.extend({
     /** Doc text to be updated */
     text: z.string().max(DocumentValidation.maxLength).optional(),
 
+    /** Canonical lightweight table, stored through the Markdown document path. */
+    table: TableDocumentSchema.optional(),
+
     /** Icon displayed alongside doc title */
     icon: zodIconType().nullish(),
 
@@ -438,6 +445,32 @@ export const DocumentsUpdateSchema = BaseSchema.extend({
   }),
 })
   .refine(
+    (req) => req.body.table === undefined || req.body.text === undefined,
+    {
+      message: "table and text cannot be provided together",
+      path: ["body", "table"],
+    }
+  )
+  .refine(
+    (req) =>
+      req.body.table === undefined || req.body.lastRevision !== undefined,
+    {
+      message: "lastRevision is required when updating a lightweight table",
+      path: ["body", "lastRevision"],
+    }
+  )
+  .refine(
+    (req) =>
+      req.body.table === undefined ||
+      (!req.body.append &&
+        (req.body.editMode === undefined ||
+          req.body.editMode === TextEditMode.Replace)),
+    {
+      message: "editMode must be replace when updating a lightweight table",
+      path: ["body", "editMode"],
+    }
+  )
+  .refine(
     (req) =>
       !(
         (req.body.append ||
@@ -470,6 +503,9 @@ export const DocumentsUpdateSchema = BaseSchema.extend({
       req.body.editMode = TextEditMode.Append;
     }
     delete req.body.append;
+    if (req.body.table !== undefined) {
+      req.body.text = tableDocumentToMarkdown(req.body.table);
+    }
     return req;
   });
 
@@ -561,6 +597,9 @@ export const DocumentsCreateSchema = BaseSchema.extend({
     /** Document text */
     text: z.string().max(DocumentValidation.maxLength).optional(),
 
+    /** Canonical lightweight table, stored through the Markdown document path. */
+    table: TableDocumentSchema.optional(),
+
     /** Icon displayed alongside doc title */
     icon: zodIconType().optional(),
 
@@ -604,13 +643,31 @@ export const DocumentsCreateSchema = BaseSchema.extend({
       })
       .nullish(),
   }),
-}).refine(
-  (req) =>
-    !(req.body.publish && !req.body.parentDocumentId && !req.body.collectionId),
-  {
-    message: "collectionId or parentDocumentId is required to publish",
-  }
-);
+})
+  .refine(
+    (req) => req.body.table === undefined || req.body.text === undefined,
+    {
+      message: "table and text cannot be provided together",
+      path: ["body", "table"],
+    }
+  )
+  .refine(
+    (req) =>
+      !(
+        req.body.publish &&
+        !req.body.parentDocumentId &&
+        !req.body.collectionId
+      ),
+    {
+      message: "collectionId or parentDocumentId is required to publish",
+    }
+  )
+  .transform((req) => {
+    if (req.body.table !== undefined) {
+      req.body.text = tableDocumentToMarkdown(req.body.table);
+    }
+    return req;
+  });
 
 export type DocumentsCreateReq = z.infer<typeof DocumentsCreateSchema>;
 

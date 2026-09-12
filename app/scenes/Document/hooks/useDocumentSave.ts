@@ -52,6 +52,12 @@ interface UseDocumentSaveResult {
   onFileUploadStop: () => void;
 }
 
+/**
+ * Determines whether a newly created, untouched draft can be discarded on exit.
+ *
+ * @param options the latest content, ownership and persistence state.
+ * @returns whether the empty draft belongs to the current user and can be deleted.
+ */
 export function shouldAutoDeleteDraftOnUnmount({
   isEditorEmpty,
   title,
@@ -351,24 +357,31 @@ export function useDocumentSave({
       const isEditorEmpty =
         !currentDoc || ProsemirrorHelper.isEmpty(currentDoc);
 
-      if (
-        shouldAutoDeleteDraftOnUnmount({
-          isEditorEmpty,
-          title: titleRef.current,
-          createdById: document.createdBy?.id,
-          currentUserId: auth.user?.id,
-          isDraft: document.isDraft,
-          isActive: document.isActive,
-          hasEmptyTitle: document.hasEmptyTitle,
-          isPersistedOnce: document.isPersistedOnce,
-        })
-      ) {
-        void document.delete();
-      } else if (document.isDirty()) {
-        void document.save(undefined, {
-          autosave: true,
-        });
-      }
+      // StrictMode replays cleanup while the editor is still open. Wait until
+      // effects have settled before deleting or saving a document on unmount.
+      queueMicrotask(() => {
+        if (isMounted()) {
+          return;
+        }
+        if (
+          shouldAutoDeleteDraftOnUnmount({
+            isEditorEmpty,
+            title: titleRef.current,
+            createdById: document.createdBy?.id,
+            currentUserId: auth.user?.id,
+            isDraft: document.isDraft,
+            isActive: document.isActive,
+            hasEmptyTitle: document.hasEmptyTitle,
+            isPersistedOnce: document.isPersistedOnce,
+          })
+        ) {
+          void document.delete();
+        } else if (document.isDirty()) {
+          void document.save(undefined, {
+            autosave: true,
+          });
+        }
+      });
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps
     []

@@ -627,6 +627,14 @@ export function documentTools(server: McpServer, scopes: string[]) {
             .string()
             .describe("The unique identifier of the document to update."),
           title: optionalString().describe("The new title for the document."),
+          lastRevision: z
+            .number()
+            .int()
+            .nonnegative()
+            .optional()
+            .describe(
+              "The document revision returned by fetch. Required when editing lightweight table content; an outdated revision rejects the content update."
+            ),
           text: z
             .string()
             .optional()
@@ -725,6 +733,7 @@ export function documentTools(server: McpServer, scopes: string[]) {
             const breadcrumb = await getDocumentBreadcrumb(updated, user);
             return success({
               success: true,
+              revision: updated.revisionCount,
               ...pathToUrl(user.team, {
                 id: updated.id,
                 title: updated.title,

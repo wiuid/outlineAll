@@ -79,7 +79,9 @@ export default function DocumentScene(props: Props) {
     >
       {(rest) => (
         <Document {...rest}>
-          <Footer document={rest.document} />
+          {(!rest.document.tableContent || rest.revision) && (
+            <Footer document={rest.document} />
+          )}
         </Document>
       )}
     </DataLoader>

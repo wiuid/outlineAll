@@ -15,6 +15,7 @@ import {
   subscribeCollection,
   unsubscribeCollection,
   createDocument,
+  createTable,
   exportCollection,
   importDocument,
   openCollectionInSplit,
@@ -40,6 +41,7 @@ export function useCollectionMenuAction({ collectionId, onRename }: Props) {
       unsubscribeCollection,
       ActionSeparator,
       createDocument,
+      createTable,
       importDocument,
       ActionSeparator,
       renameActionFactory({

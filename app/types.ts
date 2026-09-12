@@ -17,6 +17,9 @@ import type User from "./models/User";
 import type UserMembership from "./models/UserMembership";
 import type Policy from "./models/Policy";
 
+/** The content to initialize when creating a document. */
+export type DocumentCreationType = "document" | "table";
+
 export type PartialExcept<T, K extends keyof T> = Partial<Omit<T, K>> &
   Required<Pick<T, K>>;
 

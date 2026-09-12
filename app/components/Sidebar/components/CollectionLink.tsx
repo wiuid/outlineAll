@@ -2,7 +2,6 @@ import { observer } from "mobx-react";
 import * as React from "react";
 import { useHistory } from "react-router-dom";
 import { UserPreference } from "@shared/types";
-import { ProsemirrorDataHelper } from "@shared/utils/ProsemirrorDataHelper";
 import type Collection from "~/models/Collection";
 import type Document from "~/models/Document";
 import type { RefHandle } from "~/components/EditableTitle";
@@ -12,6 +11,7 @@ import usePolicy from "~/hooks/usePolicy";
 import useStores from "~/hooks/useStores";
 import CollectionMenu from "~/menus/CollectionMenu";
 import * as Scenes from "~/routes/scenes";
+import type { DocumentCreationType } from "~/types";
 import useBoolean from "~/hooks/useBoolean";
 import { documentEditPath } from "~/utils/routeHelpers";
 import { useDropToChangeCollection } from "../hooks/useDragAndDrop";
@@ -75,15 +75,15 @@ const CollectionLink: React.FC<Props> = ({
   }, []);
 
   const handleNewDoc = React.useCallback(
-    async (input: string) => {
-      const newDocument = await documents.create(
+    async (input: string, type: DocumentCreationType) => {
+      const newDocument = await documents.createEmptyDocument(
         {
           collectionId: collection.id,
           title: input,
           fullWidth: user.getPreference(UserPreference.FullWidthDocuments),
-          data: ProsemirrorDataHelper.getEmpty(),
         },
-        { publish: true }
+        { publish: true },
+        type
       );
       collection?.addDocument(newDocument);
       history.push({

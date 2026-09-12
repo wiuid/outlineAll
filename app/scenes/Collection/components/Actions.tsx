@@ -1,18 +1,14 @@
 import { observer } from "mobx-react";
-import { EditIcon, PlusIcon } from "outline-icons";
+import { EditIcon } from "outline-icons";
 import { useTranslation } from "react-i18next";
-import { Link } from "react-router-dom";
 import type Collection from "~/models/Collection";
 import { Action } from "~/components/Actions";
 import Button from "~/components/Button";
 import Tooltip from "~/components/Tooltip";
 import usePolicy from "~/hooks/usePolicy";
 import CollectionMenu from "~/menus/CollectionMenu";
-import {
-  collectionEditPath,
-  collectionPath,
-  newDocumentPath,
-} from "~/utils/routeHelpers";
+import NewDocumentMenu from "~/menus/NewDocumentMenu";
+import { collectionEditPath, collectionPath } from "~/utils/routeHelpers";
 import useCurrentUser from "~/hooks/useCurrentUser";
 import type { SidebarContextType } from "~/components/Sidebar/components/SidebarContext";
 import { CollectionTab } from "./Navigation";
@@ -80,17 +76,11 @@ function Actions({ collection, isEditing, sidebarContext }: Props) {
       )}
       {can.createDocument && (
         <Action>
-          <Tooltip content={t("New document")} shortcut="n" placement="bottom">
-            <Button
-              as={Link}
-              to={collection ? newDocumentPath(collection.id) : ""}
-              disabled={!collection}
-              icon={<PlusIcon />}
-              neutral={isEditing}
-            >
-              {t("New doc")}
-            </Button>
-          </Tooltip>
+          <NewDocumentMenu
+            collectionId={collection.id}
+            sidebarContext={sidebarContext}
+            neutral={isEditing}
+          />
         </Action>
       )}
       <Action>

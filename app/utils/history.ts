@@ -6,6 +6,7 @@ import type {
 } from "history";
 import { createBrowserHistory, createPath, parsePath } from "history";
 import { isMobile } from "@shared/utils/browser";
+import { TABLE_SAVE_PROMPT, tableSaves } from "~/stores/TableSaveCoordinator";
 import {
   getFocusedSplitPane,
   getSplitPath,
@@ -53,7 +54,18 @@ export function toLocationDescriptor(
   return to;
 }
 
-const history = createBrowserHistory();
+const history = createBrowserHistory({
+  getUserConfirmation(message, callback) {
+    if (message === TABLE_SAVE_PROMPT) {
+      void tableSaves.flush().then(
+        () => callback(true),
+        () => callback(false)
+      );
+      return;
+    }
+    callback(window.confirm(message));
+  },
+});
 
 /**
  * Applies split view handling to a navigation. While a split view is open:

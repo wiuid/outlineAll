@@ -1,6 +1,6 @@
 import type { Location, LocationDescriptor } from "history";
 import { observer } from "mobx-react";
-import { PlusIcon } from "outline-icons";
+import { DocumentIcon, PlusIcon, TableIcon } from "outline-icons";
 import * as React from "react";
 import type { ConnectDragSource } from "react-dnd";
 import { useTranslation } from "react-i18next";
@@ -11,15 +11,19 @@ import type Document from "~/models/Document";
 import EditableTitle, { type RefHandle } from "~/components/EditableTitle";
 import Fade from "~/components/Fade";
 import NudeButton from "~/components/NudeButton";
-import Tooltip from "~/components/Tooltip";
 import useBoolean from "~/hooks/useBoolean";
 import { ActionContextProvider } from "~/hooks/useActionContext";
+import { DocumentTypeMenu } from "~/menus/DocumentTypeMenu";
 import DropToImport from "./DropToImport";
 import Relative from "./Relative";
 import SidebarLink from "./SidebarLink";
 import type { SidebarContextType } from "./SidebarContext";
 import { useSidebarContext } from "./SidebarContext";
-import type { ActionFactory, ActionWithChildren } from "~/types";
+import type {
+  ActionFactory,
+  ActionWithChildren,
+  DocumentCreationType,
+} from "~/types";
 
 export type DocumentRowProps = {
   /** Document identifier for policy, prefetch and import. */
@@ -93,7 +97,7 @@ export type DocumentRowProps = {
   /** When true, the "+" new-child button is rendered in the menu slot. */
   canCreateChild?: boolean;
   /** Submit handler for the inline new-child title input. */
-  onCreateChild?: (title: string) => Promise<void>;
+  onCreateChild?: (title: string, type: DocumentCreationType) => Promise<void>;
   /** Depth of the inline new-child SidebarLink. Defaults to `depth + 1`. */
   newChildDepth?: number;
 
@@ -163,6 +167,10 @@ function DocumentRow({
   );
   const [isAddingNewChild, setIsAddingNewChild, closeAddingNewChild] =
     useBoolean();
+  const [creationMenuOpen, handleCreationMenuOpen, handleCreationMenuClose] =
+    useBoolean();
+  const [newChildType, setNewChildType] =
+    React.useState<DocumentCreationType>("document");
   const newChildTitleRef = React.useRef<RefHandle>(null);
 
   const handleKeyDown = React.useCallback(
@@ -181,8 +189,8 @@ function DocumentRow({
   );
 
   const handleAddChild = React.useCallback(
-    (ev: React.MouseEvent<HTMLButtonElement>) => {
-      ev.preventDefault();
+    (type: DocumentCreationType) => {
+      setNewChildType(type);
       setIsAddingNewChild();
       onExpand?.();
     },
@@ -196,13 +204,13 @@ function DocumentRow({
       }
       try {
         newChildTitleRef.current?.setIsEditing(false);
-        await onCreateChild(value);
+        await onCreateChild(value, newChildType);
         closeAddingNewChild();
       } catch (_err) {
         newChildTitleRef.current?.setIsEditing(true);
       }
     },
-    [onCreateChild, closeAddingNewChild]
+    [onCreateChild, newChildType, closeAddingNewChild]
   );
 
   const labelElement =
@@ -224,14 +232,16 @@ function DocumentRow({
   const menuElement = menuVisible ? (
     <Fade>
       {canCreateChild && (
-        <Tooltip content={t("New doc")}>
-          <NudeButton
-            aria-label={t("New nested document")}
-            onClick={handleAddChild}
-          >
+        <DocumentTypeMenu
+          onSelect={handleAddChild}
+          onOpen={handleCreationMenuOpen}
+          onClose={handleCreationMenuClose}
+          tooltip={t("Create")}
+        >
+          <NudeButton aria-label={t("Create")}>
             <PlusIcon />
           </NudeButton>
-        </Tooltip>
+        </DocumentTypeMenu>
       )}
       {menu}
     </Fade>
@@ -269,7 +279,7 @@ function DocumentRow({
       scrollIntoViewIfNeeded={scrollIntoViewIfNeeded}
       isDraft={isDraft}
       unreadBadge={unreadBadge}
-      $showActions={menuOpen}
+      $showActions={menuOpen || creationMenuOpen}
       menu={menuElement}
     />
   );
@@ -309,12 +319,13 @@ function DocumentRow({
           isActive={() => true}
           depth={newChildDepth ?? depth + 1}
           ellipsis={false}
+          icon={newChildType === "table" ? <TableIcon /> : <DocumentIcon />}
           label={
             <EditableTitle
               title=""
               canUpdate
               isEditing
-              placeholder={`${t("New doc")}…`}
+              placeholder={`${newChildType === "table" ? t("New table") : t("New doc")}…`}
               onCancel={closeAddingNewChild}
               onSubmit={handleNewChildSubmit}
               maxLength={DocumentValidation.maxTitleLength}

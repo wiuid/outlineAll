@@ -1,11 +1,18 @@
 import type { DocumentPreferences, TextEditMode } from "@shared/types";
-import { DocumentConflictError } from "@server/errors";
+import { getTableDocument } from "@shared/utils/tableDocument";
+import { parser } from "@server/editor";
+import {
+  DocumentConflictError,
+  NotFoundError,
+  ValidationError,
+} from "@server/errors";
 import { Event, Document } from "@server/models";
 import { DocumentHelper } from "@server/models/helpers/DocumentHelper";
 import { TextHelper } from "@server/models/helpers/TextHelper";
+import { sequelize } from "@server/storage/database";
 import type { APIContext } from "@server/types";
 
-type Props = {
+interface Props {
   /** The existing document */
   document: Document;
   /** The new title */
@@ -38,19 +45,39 @@ type Props = {
   publish?: boolean;
   /** The ID of the collection to publish the document to */
   collectionId?: string | null;
-};
+}
 
 /**
  * This command updates document properties. To update collaborative text state
- * use documentCollaborativeUpdater.
+ * use documentCollaborativeUpdater. Starts a transaction when the caller has
+ * not provided one, so revision checks and writes always share a row lock.
  *
- * @param Props The properties of the document to update
- * @returns Document The updated document
+ * @param ctx the API context for the update.
+ * @param props the properties of the document to update.
+ * @returns the updated document.
+ * @throws {DocumentConflictError} if the revision no longer matches.
+ * @throws {ValidationError} if a table content update is missing its revision.
+ * @throws {NotFoundError} if the document no longer exists.
  */
 export default async function documentUpdater(
   ctx: APIContext,
-  {
-    document,
+  props: Props
+): Promise<Document> {
+  if (!ctx.state.transaction) {
+    return sequelize.transaction((transaction) =>
+      documentUpdater(
+        {
+          ...ctx,
+          state: { ...ctx.state, transaction },
+          context: { ...ctx.context, transaction },
+        },
+        props
+      )
+    );
+  }
+
+  let { document } = props;
+  const {
     title,
     icon,
     color,
@@ -66,10 +93,47 @@ export default async function documentUpdater(
     publish,
     collectionId,
     done,
-  }: Props
-): Promise<Document> {
+  } = props;
   const { user } = ctx.state.auth;
   const { transaction } = ctx.state;
+
+  // Check under a row lock before mutating the instance or processing attachments.
+  // The revision predicate is rechecked by PostgreSQL after a concurrent writer
+  // releases its lock, so only one writer can commit against a given revision.
+  const locked = await Document.unscoped().findOne({
+    attributes: ["id", "revisionCount"],
+    where: {
+      id: document.id,
+      ...(lastRevision !== undefined && { revisionCount: lastRevision }),
+    },
+    transaction,
+    lock: transaction.LOCK.UPDATE,
+    paranoid: false,
+  });
+
+  if (!locked) {
+    throw lastRevision !== undefined
+      ? DocumentConflictError()
+      : NotFoundError();
+  }
+
+  // A writer may have committed while this request was waiting for the lock.
+  // Refresh the instance so content edits and revision increments use that state.
+  if (locked.revisionCount !== document.revisionCount) {
+    await document.reload({ transaction });
+  }
+
+  if (
+    text !== undefined &&
+    lastRevision === undefined &&
+    (getTableDocument(await DocumentHelper.toJSON(document)) ||
+      getTableDocument(parser.parse(text).toJSON()))
+  ) {
+    throw ValidationError(
+      "lastRevision is required when updating a lightweight table"
+    );
+  }
+
   const cId = collectionId || document.collectionId;
 
   if (title !== undefined) {
@@ -108,27 +172,6 @@ export default async function documentUpdater(
       editMode,
       findText
     );
-  }
-
-  // Serialize concurrent updates to the same document by taking a row-level
-  // lock before writing. The wait is already bounded by the transaction's
-  // statement_timeout. When lastRevision is provided it becomes part of the
-  // predicate, so a document modified since that revision matches no row.
-  if (transaction) {
-    const locked = await Document.unscoped().findOne({
-      attributes: ["id"],
-      where: {
-        id: document.id,
-        ...(lastRevision !== undefined && { revisionCount: lastRevision }),
-      },
-      transaction,
-      lock: transaction.LOCK.UPDATE,
-      paranoid: false,
-    });
-
-    if (!locked && lastRevision !== undefined) {
-      throw DocumentConflictError();
-    }
   }
 
   const changed = document.changed();

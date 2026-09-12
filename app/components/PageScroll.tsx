@@ -40,6 +40,7 @@ const PageScroll = ({ children }: Props) => {
     <ScrollContext.Provider value={shouldApplyMobileStyles ? ref : undefined}>
       <StableWrapper
         ref={ref}
+        data-page-scroll
         $shouldApplyMobileStyles={shouldApplyMobileStyles}
       >
         {children}

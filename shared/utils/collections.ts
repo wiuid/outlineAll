@@ -7,6 +7,14 @@ type Sort = {
   direction: "asc" | "desc";
 };
 
+/**
+ * Sorts a navigation tree without changing the stored manual order.
+ *
+ * @param nodes the navigation nodes, which may be observable.
+ * @param sort the field and direction to display.
+ * @param sortChildren whether to sort descendants as well.
+ * @returns the sorted tree, retaining unchanged node references.
+ */
 export const sortNavigationNodes = (
   nodes: NavigationNode[],
   sort: Sort,
@@ -18,7 +26,7 @@ export const sortNavigationNodes = (
     return nodes;
   }
 
-  const orderedDocs = naturalSort(nodes, sort.field, {
+  const orderedDocs = naturalSort(nodes.slice(), sort.field, {
     direction: sort.direction,
   });
 

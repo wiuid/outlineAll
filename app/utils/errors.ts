@@ -14,6 +14,11 @@ export class BadRequestError extends ExtendableError {
   name = "BadRequestError";
 }
 
+/** Error thrown when a document was changed after the editor's base revision. */
+export class DocumentConflictError extends ExtendableError {
+  name = "DocumentConflictError";
+}
+
 /** Error thrown when a network-level failure prevents a request. */
 export class NetworkError extends ExtendableError {
   name = "NetworkError";

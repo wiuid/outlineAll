@@ -1,10 +1,9 @@
 import { observer } from "mobx-react";
-import { useEffect } from "react";
+import { useEffect, useRef } from "react";
 import { useTranslation } from "react-i18next";
 import { useHistory, useLocation, useRouteMatch } from "react-router-dom";
 import { toast } from "sonner";
 import { UserPreference } from "@shared/types";
-import { ProsemirrorDataHelper } from "@shared/utils/ProsemirrorDataHelper";
 import CenteredContent from "~/components/CenteredContent";
 import Flex from "~/components/Flex";
 import PlaceholderDocument from "~/components/PlaceholderDocument";
@@ -24,10 +23,20 @@ function DocumentNew() {
   const { documents, collections, userMemberships, groupMemberships } =
     useStores();
   const id = match.params.collectionSlug || query.get("collectionId");
+  const creationStarted = useRef(false);
 
   useEffect(() => {
+    // React StrictMode replays effects in development. A workbook has unique
+    // IDs, so two creations cannot rely on HTTP request deduplication.
+    if (creationStarted.current) {
+      return;
+    }
+    creationStarted.current = true;
     // Download the editor while the document is being created on the server
-    preloadEditor();
+    const isTable = query.get("type") === "table";
+    if (!isTable) {
+      preloadEditor();
+    }
 
     async function createDocument() {
       const index = parseInt(query.get("index") || "0", 10);
@@ -42,7 +51,8 @@ function DocumentNew() {
           collection = await collections.fetch(id);
         }
 
-        const document = await documents.create(
+        const title = query.get("title") ?? "";
+        const document = await documents.createEmptyDocument(
           {
             collectionId: collection?.id,
             parentDocumentId,
@@ -50,13 +60,13 @@ function DocumentNew() {
               parentDocument?.fullWidth ||
               user.getPreference(UserPreference.FullWidthDocuments),
             templateId: query.get("templateId") ?? undefined,
-            title: query.get("title") ?? "",
-            data: ProsemirrorDataHelper.getEmpty(),
+            title,
           },
           {
             publish: collection?.id || parentDocumentId ? true : undefined,
             index,
-          }
+          },
+          isTable ? "table" : "document"
         );
 
         if (parentDocumentId) {

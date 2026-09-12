@@ -7,7 +7,6 @@ import type { match } from "react-router";
 import { useHistory } from "react-router-dom";
 import styled from "styled-components";
 import { type NavigationNode, UserPreference } from "@shared/types";
-import { ProsemirrorDataHelper } from "@shared/utils/ProsemirrorDataHelper";
 import type Collection from "~/models/Collection";
 import type Document from "~/models/Document";
 import type Star from "~/models/Star";
@@ -22,6 +21,7 @@ import useStores from "~/hooks/useStores";
 import CollectionMenu from "~/menus/CollectionMenu";
 import DocumentMenu from "~/menus/DocumentMenu";
 import * as Scenes from "~/routes/scenes";
+import type { DocumentCreationType } from "~/types";
 import { documentEditPath } from "~/utils/routeHelpers";
 import {
   useDragStar,
@@ -144,11 +144,11 @@ const StarredDocumentLink = observer(function StarredDocumentLink({
   );
 
   const handleNewDoc = React.useCallback(
-    async (input: string) => {
+    async (input: string, type: DocumentCreationType) => {
       if (!document) {
         return;
       }
-      const newDocument = await documents.create(
+      const newDocument = await documents.createEmptyDocument(
         {
           collectionId: documentCollection?.id,
           parentDocumentId: document.id,
@@ -156,9 +156,9 @@ const StarredDocumentLink = observer(function StarredDocumentLink({
             document.fullWidth ??
             user.getPreference(UserPreference.FullWidthDocuments),
           title: input,
-          data: ProsemirrorDataHelper.getEmpty(),
         },
-        { publish: true }
+        { publish: true },
+        type
       );
       documentCollection?.addDocument(newDocument, document.id);
       history.push({
@@ -300,15 +300,15 @@ const StarredCollectionLink = observer(function StarredCollectionLink({
   }, [collection]);
 
   const handleNewDoc = React.useCallback(
-    async (input: string) => {
-      const newDocument = await documents.create(
+    async (input: string, type: DocumentCreationType) => {
+      const newDocument = await documents.createEmptyDocument(
         {
           collectionId: collection.id,
           title: input,
           fullWidth: user.getPreference(UserPreference.FullWidthDocuments),
-          data: ProsemirrorDataHelper.getEmpty(),
         },
-        { publish: true }
+        { publish: true },
+        type
       );
       collection?.addDocument(newDocument);
       history.push({
