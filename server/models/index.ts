@@ -71,6 +71,8 @@ export { default as UserAuthentication } from "./UserAuthentication";
 export { default as View } from "./View";
 
 export { default as WebhookSubscription } from "./WebhookSubscription";
+export { TableScript } from "./TableScript";
+export { TableScriptRun } from "./TableScriptRun";
 
 export { default as WebhookDelivery } from "./WebhookDelivery";
 

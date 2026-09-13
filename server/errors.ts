@@ -127,6 +127,38 @@ export function DocumentConflictError(
   });
 }
 
+/**
+ * Rejects an edit or run that was submitted against an older script revision.
+ *
+ * @returns an HTTP conflict without overwriting the saved script.
+ */
+export function TableScriptConflictError() {
+  return httpErrors(
+    409,
+    "Script has changed. Reload it before saving or running.",
+    {
+      id: "table_script_conflict",
+      isReportable: false,
+    }
+  );
+}
+
+/**
+ * Reports that the separate, authenticated script runner is unavailable.
+ *
+ * @returns a service-unavailable response without exposing runner credentials.
+ */
+export function TableScriptUnavailableError() {
+  return httpErrors(
+    503,
+    "The isolated Python execution service is not available",
+    {
+      id: "table_script_unavailable",
+      isReportable: false,
+    }
+  );
+}
+
 export function ParamRequiredError(message = "Required parameter missing") {
   return httpErrors(400, message, {
     id: "param_required",

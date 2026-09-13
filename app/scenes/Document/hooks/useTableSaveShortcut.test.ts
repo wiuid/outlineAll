@@ -73,6 +73,22 @@ afterEach(async () => {
 });
 
 const modifiers: ("ctrlKey" | "metaKey")[] = ["ctrlKey", "metaKey"];
+it("leaves the script editor save shortcut to its own handler", async () => {
+  const onSave = vi.fn<() => Promise<void>>().mockResolvedValue();
+  await mountShortcut(onSave);
+  const panel = document.createElement("div");
+  panel.setAttribute("data-table-script-panel", "document");
+  const input = document.createElement("textarea");
+  panel.append(input);
+  document.body.append(panel);
+  try {
+    expect(pressSave(input).defaultPrevented).toBe(false);
+    expect(onSave).not.toHaveBeenCalled();
+  } finally {
+    panel.remove();
+  }
+});
+
 it.each(modifiers)(
   "cancels the browser's %s+S from a portaled input, even when it stops propagation",
   async (modifier) => {

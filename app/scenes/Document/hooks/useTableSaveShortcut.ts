@@ -15,6 +15,8 @@ export function useTableSaveShortcut(onSave: () => Promise<void>): void {
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
       if (
+        (event.target instanceof Element &&
+          event.target.closest("[data-table-script-panel]")) ||
         (isSplitView && pane !== getFocusedSplitPane()) ||
         !(event.ctrlKey || event.metaKey) ||
         event.altKey ||

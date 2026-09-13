@@ -19,6 +19,11 @@ export class DocumentConflictError extends ExtendableError {
   name = "DocumentConflictError";
 }
 
+/** Error thrown when a script was changed after the editor's base revision. */
+export class TableScriptConflictError extends ExtendableError {
+  name = "TableScriptConflictError";
+}
+
 /** Error thrown when a network-level failure prevents a request. */
 export class NetworkError extends ExtendableError {
   name = "NetworkError";

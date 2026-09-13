@@ -11,6 +11,7 @@ const services = {
   web: () => import("./web"),
   worker: () => import("./worker"),
   cron: () => import("./cron"),
+  tablescripts: () => import("./tableScripts"),
 } as const;
 
 export default services;

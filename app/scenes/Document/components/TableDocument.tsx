@@ -24,7 +24,14 @@ import { createUniver } from "@univerjs/presets";
 import "@univerjs/preset-sheets-core/lib/index.css";
 import { observer } from "mobx-react";
 import { MenuIcon } from "outline-icons";
-import { useCallback, useEffect, useRef, useState } from "react";
+import {
+  lazy,
+  Suspense,
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+} from "react";
 import type { ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { useTranslation } from "react-i18next";
@@ -58,9 +65,16 @@ import {
   createTablePreset,
 } from "~/utils/tablePreset";
 import { getTableWorkbook } from "~/utils/tableWorkbook";
+import { registerTableScriptMenu } from "~/utils/tableScriptMenu";
 import { useTableSaveShortcut } from "../hooks/useTableSaveShortcut";
 import Notices from "./Notices";
 import { TableSheetControls } from "./TableSheetControls";
+
+const ScriptPanel = lazy(() =>
+  import("./TableScriptPanel").then((module) => ({
+    default: module.TableScriptPanel,
+  }))
+);
 
 interface Props {
   document: Document;
@@ -76,6 +90,7 @@ interface TableRuntime {
   flush: () => Promise<void>;
   setEditable: (editable: boolean) => void;
   setDarkMode: (dark: boolean) => void;
+  setScriptsAvailable?: (available: boolean) => void;
 }
 
 /**
@@ -92,7 +107,7 @@ export const TableDocument = observer(function TableDocument({
   shareId,
   children,
 }: Props) {
-  const { auth, dialogs, ui } = useStores();
+  const { auth, dialogs, ui, tableScripts } = useStores();
   const { t, i18n } = useTranslation();
   const theme = useTheme();
   const history = useHistory();
@@ -110,6 +125,24 @@ export const TableDocument = observer(function TableDocument({
   const runtimeRef = useRef<TableRuntime>();
   const [ready, setReady] = useState(false);
   const [cellEditing, setCellEditing] = useState(false);
+  const scriptSession = tableScripts.getSession(document.id);
+  const [scriptMaximized, setScriptMaximized] = useState(false);
+  const scriptTrigger = useRef<Element | null>(null);
+  const ownsDocument = document.createdBy?.id === auth.user?.id;
+  const scriptsAvailable =
+    !mobile &&
+    editable &&
+    !shareId &&
+    ownsDocument &&
+    !!scriptSession.capabilities?.canDevelop;
+
+  useEffect(() => {
+    if (!mobile && editable && !shareId) {
+      void scriptSession.loadCapabilities().catch(() => {
+        /* A missing API does not affect the spreadsheet. */
+      });
+    }
+  }, [editable, mobile, ownsDocument, scriptSession, shareId]);
 
   const createSession = useCallback(
     (content: TableDocumentContent) => {
@@ -179,6 +212,43 @@ export const TableDocument = observer(function TableDocument({
         host.remove();
       };
       const workbook = univerAPI.createWorkbook(session.table.workbook);
+      const scriptMenu =
+        !mobile && !shareId
+          ? registerTableScriptMenu(
+              univer.__getInjector(),
+              i18n.language.startsWith("zh"),
+              (mode) => {
+                void scriptSession.open(mode).catch(() => {
+                  /* Displayed in the panel. */
+                });
+              }
+            )
+          : undefined;
+      if (scriptMenu) {
+        uiDisposables.add(scriptMenu);
+        // Univer moves focus to its canvas before invoking a menu command.
+        const handleToolbarInteraction = (event: Event) => {
+          if (!(event.target instanceof Element)) {
+            return;
+          }
+          const button = event.target.closest("button");
+          if (button && toolbar.contains(button)) {
+            scriptTrigger.current = button;
+          }
+        };
+        toolbar.addEventListener("focusin", handleToolbarInteraction);
+        toolbar.addEventListener("click", handleToolbarInteraction, true);
+        uiDisposables.add({
+          dispose: () => {
+            toolbar.removeEventListener("focusin", handleToolbarInteraction);
+            toolbar.removeEventListener(
+              "click",
+              handleToolbarInteraction,
+              true
+            );
+          },
+        });
+      }
       session.initialize(workbook.save());
       const editorService = univer.__getInjector().get(IEditorService);
       uiDisposables.add({
@@ -365,6 +435,7 @@ export const TableDocument = observer(function TableDocument({
         flush,
         setEditable,
         setDarkMode: (dark) => univerAPI.toggleDarkMode(dark),
+        setScriptsAvailable: scriptMenu?.setAvailable,
       };
       runtimeRef.current = runtime;
       if (mobile) {
@@ -455,6 +526,9 @@ export const TableDocument = observer(function TableDocument({
   useEffect(() => {
     runtimeRef.current?.setDarkMode(theme.isDark);
   }, [theme.isDark]);
+  useEffect(() => {
+    runtimeRef.current?.setScriptsAvailable?.(scriptsAvailable);
+  }, [ready, scriptsAvailable]);
 
   const handleDownload = useCallback(async () => {
     try {
@@ -659,6 +733,16 @@ export const TableDocument = observer(function TableDocument({
         aria-label={t("Spreadsheet")}
         aria-busy={!ready}
       />
+      {scriptsAvailable && scriptSession.mode && (
+        <Suspense fallback={null}>
+          <ScriptPanel
+            session={scriptSession}
+            maximized={scriptMaximized}
+            onMaximize={() => setScriptMaximized((value) => !value)}
+            returnFocusTo={scriptTrigger.current}
+          />
+        </Suspense>
+      )}
       {children}
     </Workspace>
   );

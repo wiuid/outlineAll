@@ -41,7 +41,8 @@ const isWebProcess =
   env.SERVICES.includes("collaboration");
 
 const isWorkerProcess =
-  env.SERVICES.length === 1 && env.SERVICES.includes("worker");
+  env.SERVICES.length === 1 &&
+  (env.SERVICES.includes("worker") || env.SERVICES.includes("tablescripts"));
 
 // Mirrors the `count` passed to throng below, where undefined falls back to
 // throng's default of one process per CPU.

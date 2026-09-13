@@ -1,0 +1,42 @@
+name: outline-table-scripts
+
+# Run only against the dedicated rootless socket created by deploy-rootless.py.
+# Never mount the system Docker socket or Outline's environment in this service.
+services:
+  runner:
+    image: ${RUNNER_MANAGER_IMAGE_ID:?Use the pinned local manager image ID}
+    pull_policy: never
+    container_name: outline-script-manager
+    user: "65532:0"
+    init: true
+    restart: unless-stopped
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    cpus: 1
+    mem_limit: 256m
+    memswap_limit: 256m
+    pids_limit: 128
+    stop_grace_period: 30s
+    ports:
+      - "127.0.0.1:3035:3035"
+    environment:
+      RUNNER_IMAGE_ID: ${RUNNER_PYTHON_IMAGE_ID:?Use the pinned local Python image ID}
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,nodev,size=16m,mode=1777
+    volumes:
+      - type: bind
+        source: ${RUNNER_DOCKER_SOCKET:?Use only the dedicated rootless socket}
+        target: /var/run/docker.sock
+      - type: bind
+        source: ${RUNNER_STATE_PATH:?Use a persistent directory for execution IDs}
+        target: /state
+      - type: bind
+        source: ${RUNNER_TOKEN_PATH:?Use a private service credential file}
+        target: /run/secrets/runner-token
+        read_only: true
+    logging:
+      driver: local
+      options:
+        max-size: 5m
+        max-file: "2"

@@ -21,6 +21,7 @@ import {
   RateLimitExceededError,
   RequestError,
   ServiceUnavailableError,
+  TableScriptConflictError,
   UnprocessableEntityError,
   UpdateRequiredError,
 } from "./errors";
@@ -402,6 +403,9 @@ class ApiClient {
       return new NotFoundError(message);
     }
 
+    if (status === 409 && code === "table_script_conflict") {
+      return new TableScriptConflictError(message);
+    }
     if (status === 409 && code === "document_conflict") {
       return new DocumentConflictError(message);
     }
