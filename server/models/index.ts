@@ -73,6 +73,7 @@ export { default as View } from "./View";
 export { default as WebhookSubscription } from "./WebhookSubscription";
 export { TableScript } from "./TableScript";
 export { TableScriptRun } from "./TableScriptRun";
+export { TableCollaboration } from "./TableCollaboration";
 
 export { default as WebhookDelivery } from "./WebhookDelivery";
 

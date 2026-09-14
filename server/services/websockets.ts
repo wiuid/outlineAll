@@ -19,6 +19,7 @@ import ShutdownHelper, { ShutdownOrder } from "@server/utils/ShutdownHelper";
 import { getUserForJWT } from "@server/utils/jwt";
 import { websocketQueue } from "../queues";
 import WebsocketsProcessor from "../queues/processors/WebsocketsProcessor";
+import { TableSocket } from "@server/collaboration/TableSocket";
 
 type SocketWithAuth = IO.Socket & {
   client: IO.Socket["client"] & {
@@ -107,6 +108,16 @@ export default function init(
     }
   });
 
+  const tables = new TableSocket(io);
+  void tables
+    .start()
+    .catch((error) =>
+      Logger.error("Unable to subscribe to table updates", toError(error))
+    );
+  ShutdownHelper.add("table-sockets", ShutdownOrder.normal, () =>
+    tables.dispose()
+  );
+
   io.on("connection", async (socket: SocketWithAuth) => {
     Metrics.increment("websockets.connected");
     Metrics.gaugePerInstance("websockets.count", io.engine.clientsCount);
@@ -134,6 +145,7 @@ export default function init(
 
     try {
       const user = await authenticate(socket);
+      tables.connect(socket, user);
       Logger.debug("websockets", `Authenticated socket ${socket.id}`);
 
       socket.emit("authenticated", true);

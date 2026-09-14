@@ -208,12 +208,6 @@ function DocumentHeader({
         <>
           <ObservingBanner />
           <SearchHighlightChip />
-          {!isDeleted && !isRevision && can.listViews && (
-            <Collaborators
-              document={document}
-              limit={isCompact ? 3 : undefined}
-            />
-          )}
           {(isEditing || !user?.separateEditMode) && wasNew && can.update && (
             <Action>
               <TemplatesMenu
@@ -290,6 +284,9 @@ function DocumentHeader({
                 {document.collectionId ? t("Publish") : `${t("Publish")}…`}
               </Button>
             </Action>
+          )}
+          {!isDeleted && !isRevision && user && (
+            <Collaborators document={document} compact={isCompact} />
           )}
           <Action>
             <DocumentMenu

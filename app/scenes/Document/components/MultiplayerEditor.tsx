@@ -146,11 +146,11 @@ function MultiplayerEditor(
     });
 
     provider.on("awarenessChange", (event: AwarenessChangeEvent) => {
-      presence.updateFromAwarenessChangeEvent(
-        documentId,
-        provider.awareness.clientID,
-        event
-      );
+      if (provider.status !== WebSocketStatus.Connected) {
+        presence.clearDocument(documentId);
+        return;
+      }
+      presence.updateFromAwarenessChangeEvent(documentId, event);
 
       event.states.forEach(({ user, scrollY }) => {
         if (user) {
@@ -193,12 +193,12 @@ function MultiplayerEditor(
         }
       });
     provider.on("synced", () => {
-      presence.touch(documentId, currentUser.id, false);
       setRemoteSynced(true);
       retryCount.current = 0;
     });
 
     provider.on("close", (ev: MessageEvent) => {
+      presence.clearDocument(documentId);
       if ("code" in ev.event) {
         // Note other close code are handled internally by the library
         if (ev.event.code === EditorUpdateError.code) {
@@ -243,6 +243,7 @@ function MultiplayerEditor(
       window.removeEventListener("wheel", finishObserving);
       window.removeEventListener("scroll", syncScrollPosition);
       provider?.destroy();
+      presence.clearDocument(documentId);
       void localProvider?.destroy();
       setRemoteProvider(undefined);
       ui.setMultiplayerStatus(undefined, undefined);
@@ -267,8 +268,9 @@ function MultiplayerEditor(
       id: currentUser.id,
       name: currentUser.name,
       color: currentUser.color,
+      avatarUrl: currentUser.avatarUrl,
     }),
-    [currentUser.id, currentUser.color, currentUser.name]
+    [currentUser.id, currentUser.color, currentUser.name, currentUser.avatarUrl]
   );
 
   const extensions = useMemo(() => {

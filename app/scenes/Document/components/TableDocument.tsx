@@ -5,6 +5,11 @@ import {
   DOCS_FORMULA_BAR_EDITOR_UNIT_ID_KEY,
   DOCS_NORMAL_EDITOR_UNIT_ID_KEY,
   LocaleType,
+  ICommandService,
+  IUndoRedoService,
+  UndoCommand,
+  RedoCommand,
+  type IDisposable,
 } from "@univerjs/core";
 import {
   BuiltInUIPart,
@@ -13,6 +18,7 @@ import {
   IEditorBridgeService,
   IEditorService,
   IMenuManagerService,
+  IRenderManagerService,
   Ribbon,
   ScrollToCellOperation,
   SheetCellEditorResizeService,
@@ -28,6 +34,7 @@ import {
   lazy,
   Suspense,
   useCallback,
+  useContext,
   useEffect,
   useRef,
   useState,
@@ -39,6 +46,10 @@ import { Prompt, useHistory } from "react-router-dom";
 import styled, { createGlobalStyle, useTheme } from "styled-components";
 import { isTouchDevice } from "@shared/utils/browser";
 import {
+  TableRosterSchema,
+  type TablePresence,
+} from "@shared/utils/tablePresence";
+import {
   type TableDocumentContent,
   tableDocumentToMarkdown,
 } from "@shared/utils/tableDocument";
@@ -47,6 +58,11 @@ import ConfirmationDialog from "~/components/ConfirmationDialog";
 import PageTitle from "~/components/PageTitle";
 import useStores from "~/hooks/useStores";
 import { TableDocumentMenu } from "~/menus/TableDocumentMenu";
+import { WebsocketContext } from "~/components/WebsocketProvider";
+import { TableCollaborationSession } from "~/stores/TableCollaborationSession";
+import { patchTableCells } from "~/utils/tableCollaborationView";
+import { observeCollaborationActivity } from "~/utils/collaborationCursor";
+import { CollaborationCursorAvatars } from "~/components/CollaborationCursorAvatars";
 import type Document from "~/models/Document";
 import {
   getTableDraftKey,
@@ -69,6 +85,7 @@ import { registerTableScriptMenu } from "~/utils/tableScriptMenu";
 import { useTableSaveShortcut } from "../hooks/useTableSaveShortcut";
 import Notices from "./Notices";
 import { TableSheetControls } from "./TableSheetControls";
+import { TableCollaborators } from "./TableCollaborators";
 
 const ScriptPanel = lazy(() =>
   import("./TableScriptPanel").then((module) => ({
@@ -91,6 +108,7 @@ interface TableRuntime {
   setEditable: (editable: boolean) => void;
   setDarkMode: (dark: boolean) => void;
   setScriptsAvailable?: (available: boolean) => void;
+  updatePresence?: (peers: TablePresence[]) => void;
 }
 
 /**
@@ -111,6 +129,7 @@ export const TableDocument = observer(function TableDocument({
   const { t, i18n } = useTranslation();
   const theme = useTheme();
   const history = useHistory();
+  const socket = useContext(WebsocketContext);
   // Keep the same runtime when a phone rotates or its keyboard opens.
   const [mobile] = useState(isTouchDevice);
   const editable = !readOnly && !!auth.user && !!abilities.update;
@@ -156,6 +175,24 @@ export const TableDocument = observer(function TableDocument({
       } catch {
         // Saving remains available even if browser storage is disabled.
       }
+      // A legacy snapshot draft keeps its existing recovery path. New native
+      // sessions use operation-level collaboration; public shares remain viewers.
+      let legacyDraft = false;
+      try {
+        legacyDraft = !!(draftKey && storage?.getItem(draftKey));
+      } catch {
+        /* Storage can be unavailable. */
+      }
+      if (content.version === 2 && auth.user && !shareId && !legacyDraft) {
+        return new TableCollaborationSession({
+          documentId: document.id,
+          title: document.title,
+          revision: document.revision,
+          workbook: getTableWorkbook(content, document.title),
+          draftKey,
+          storage,
+        });
+      }
       return new TableDocumentSession({
         title: document.title,
         revision: document.revision,
@@ -165,12 +202,81 @@ export const TableDocument = observer(function TableDocument({
         storage,
       });
     },
-    [auth.team, auth.user, document, editable]
+    [auth.team, auth.user, document, editable, shareId]
   );
   const [session, setSession] = useState(() => createSession(table));
+  const sessionLoaded =
+    !(session instanceof TableCollaborationSession) || session.loaded;
+
+  useEffect(() => {
+    if (!(session instanceof TableCollaborationSession)) {
+      return;
+    }
+    const refresh = () => {
+      void session.refresh().catch(() => {
+        /* Recovery is shown in the table. */
+      });
+    };
+    const watch = () => {
+      socket?.emit("table.watch", { documentId: document.id });
+      refresh();
+    };
+    const changed = (event: { documentId: string }) => {
+      if (event.documentId === document.id) {
+        refresh();
+      }
+    };
+    const revoked = (event: { documentId: string }) => {
+      if (event.documentId === document.id) {
+        runtimeRef.current?.setEditable(false);
+        refresh();
+        void document.store.fetch(document.id, { force: true }).catch(() => {
+          /* The API enforces current access. */
+        });
+      }
+    };
+    const roster = (input: object) => {
+      const event = TableRosterSchema.safeParse(input);
+      if (!event.success || event.data.documentId !== document.id) {
+        return;
+      }
+      const peers = event.data.peers;
+      session.updatePeers(peers);
+      runtimeRef.current?.updatePresence?.(peers);
+    };
+    const disconnected = () => {
+      session.updatePeers([]);
+      runtimeRef.current?.updatePresence?.([]);
+    };
+    watch();
+    socket?.on("authenticated", watch);
+    socket?.on("table.changed", changed);
+    socket?.on("table.revoked", revoked);
+    socket?.on("table.roster", roster);
+    socket?.on("disconnect", disconnected);
+    window.addEventListener("online", watch);
+    window.addEventListener("focus", refresh);
+    // Repairs missed notifications after a Redis or background-tab interruption.
+    const interval = setInterval(refresh, 15000);
+    return () => {
+      clearInterval(interval);
+      socket?.emit("table.unwatch");
+      socket?.off("authenticated", watch);
+      socket?.off("table.changed", changed);
+      socket?.off("table.revoked", revoked);
+      socket?.off("table.roster", roster);
+      socket?.off("disconnect", disconnected);
+      window.removeEventListener("online", watch);
+      window.removeEventListener("focus", refresh);
+      session.dispose();
+    };
+  }, [document, session, socket]);
 
   const handleSave = useCallback(async () => {
     try {
+      if (session instanceof TableCollaborationSession && !session.loaded) {
+        await session.load();
+      }
       await runtimeRef.current?.flush();
     } catch (error) {
       session.reportError(error);
@@ -182,13 +288,15 @@ export const TableDocument = observer(function TableDocument({
   useEffect(() => {
     const container = containerRef.current;
     const toolbar = toolbarRef.current;
-    if (!container || !toolbar) {
+    if (!container || !toolbar || !sessionLoaded) {
       return;
     }
     let alive = true;
     let permissionsInitialized = false;
     let captureTimer: ReturnType<typeof setTimeout> | undefined;
     let capturePending = false;
+    let applyingRemote = false;
+    let remotePending = false;
     const uiDisposables = new DisposableCollection();
     const host = container.ownerDocument.createElement("div");
     host.className = "outline-univer-host";
@@ -211,7 +319,13 @@ export const TableDocument = observer(function TableDocument({
         univer.dispose();
         host.remove();
       };
-      const workbook = univerAPI.createWorkbook(session.table.workbook);
+      let workbook = univerAPI.createWorkbook(session.table.workbook);
+      const collaboration =
+        session instanceof TableCollaborationSession ? session : undefined;
+      let sharedSnapshot =
+        collaboration && !collaboration.conflict
+          ? collaboration.snapshot()
+          : session.table.workbook;
       const scriptMenu =
         !mobile && !shareId
           ? registerTableScriptMenu(
@@ -250,6 +364,196 @@ export const TableDocument = observer(function TableDocument({
         });
       }
       session.initialize(workbook.save());
+      let highlights: IDisposable[] = [];
+      let renderedPresence: string | undefined;
+      let presenceFrame: number | undefined;
+      let presenceTimer: ReturnType<typeof setTimeout> | undefined;
+      const clearHighlights = () => {
+        if (presenceFrame !== undefined) {
+          cancelAnimationFrame(presenceFrame);
+          presenceFrame = undefined;
+        }
+        for (const highlight of highlights) {
+          highlight.dispose();
+        }
+        highlights = [];
+        renderedPresence = undefined;
+      };
+      const updatePresence = (peers: TablePresence[]) => {
+        if (!collaboration || !alive) {
+          clearHighlights();
+          return;
+        }
+        const canvas = univer
+          .__getInjector()
+          .get(IRenderManagerService)
+          .getRenderById(workbook.getId())
+          ?.engine.getCanvasElement();
+        if (!canvas?.isConnected) {
+          clearHighlights();
+          presenceFrame = requestAnimationFrame(() => {
+            presenceFrame = undefined;
+            updatePresence(collaboration.peers);
+          });
+          return;
+        }
+        const sheet = workbook.getActiveSheet();
+        const signature = JSON.stringify(
+          peers
+            .filter((peer) => peer.clientId !== socket?.id)
+            .map((peer) => ({
+              clientId: peer.clientId,
+              name: peer.name,
+              avatarUrl: peer.avatarUrl,
+              color: peer.color,
+              editing: peer.selection?.editing,
+              range:
+                peer.selection?.sheetId === sheet.getSheetId()
+                  ? collaboration.selectionRange(peer.selection)
+                  : null,
+            }))
+        );
+        if (signature === renderedPresence) {
+          return;
+        }
+        clearHighlights();
+        renderedPresence = signature;
+        const editors = new Map<
+          string,
+          { row: number; column: number; peers: TablePresence[] }
+        >();
+        for (const peer of peers) {
+          if (
+            peer.clientId === socket?.id ||
+            peer.selection?.sheetId !== sheet.getSheetId()
+          ) {
+            continue;
+          }
+          const range = collaboration.selectionRange(peer.selection);
+          if (!range) {
+            continue;
+          }
+          if (peer.selection.editing) {
+            const key = `${range.startRow}:${range.startColumn}`;
+            const group = editors.get(key) ?? {
+              row: range.startRow,
+              column: range.startColumn,
+              peers: [],
+            };
+            if (!group.peers.some((member) => member.userId === peer.userId)) {
+              group.peers.push(peer);
+            }
+            editors.set(key, group);
+          }
+          highlights.push(
+            sheet
+              .getRange(
+                range.startRow,
+                range.startColumn,
+                range.endRow - range.startRow + 1,
+                range.endColumn - range.startColumn + 1
+              )
+              .highlight({
+                stroke: peer.color,
+                strokeWidth: peer.selection.editing ? 3 : 2,
+                fill: `${peer.color}12`,
+                widgets: {},
+                widgetSize: 0,
+                autofillSize: 0,
+                rowHeaderFill: "transparent",
+                columnHeaderFill: "transparent",
+              })
+          );
+        }
+        for (const group of editors.values()) {
+          const users = group.peers.map((peer) => ({
+            id: peer.userId,
+            name: peer.name,
+            avatarUrl: peer.avatarUrl,
+            color: peer.color,
+          }));
+          const popup = sheet.getRange(group.row, group.column).attachPopup({
+            componentKey: () => <CollaborationCursorAvatars users={users} />,
+            direction: "horizontal-top",
+            offset: [4, 0],
+            hideOnInvisible: true,
+            showOnSelectionMoving: true,
+            mask: false,
+            zIndex: 3,
+          });
+          if (popup) {
+            highlights.push(popup);
+          }
+        }
+      };
+      let activelyEditing = false;
+      const sendPresence = () => {
+        if (!collaboration || !socket?.connected || !alive) {
+          return;
+        }
+        const sheet = workbook.getActiveSheet();
+        const range =
+          sheet.getSelection()?.getActiveRange()?.getRange() ??
+          workbook.getActiveCell()?.getRange();
+        socket.emit("table.presence", {
+          documentId: document.id,
+          selection:
+            !collaboration.conflict && range
+              ? (collaboration.selection(
+                  sheet.getSheetId(),
+                  range,
+                  activelyEditing
+                ) ?? null)
+              : null,
+        });
+      };
+      const schedulePresence = () => {
+        if (presenceTimer) {
+          return;
+        }
+        presenceTimer = setTimeout(() => {
+          presenceTimer = undefined;
+          sendPresence();
+          updatePresence(collaboration?.peers ?? []);
+        }, 250);
+      };
+      if (collaboration) {
+        const activity = observeCollaborationActivity(
+          () =>
+            editableRef.current &&
+            workbook.isCellEditing() &&
+            host.contains(host.ownerDocument.activeElement),
+          (editing) => {
+            activelyEditing = editing;
+            schedulePresence();
+          }
+        );
+        for (const event of [
+          univerAPI.Event.SelectionChanged,
+          univerAPI.Event.ActiveSheetChanged,
+          univerAPI.Event.SheetEditStarted,
+          univerAPI.Event.SheetEditEnded,
+        ]) {
+          uiDisposables.add(
+            univerAPI.addEvent(event, () => {
+              activity.refresh();
+              schedulePresence();
+            })
+          );
+        }
+        socket?.on("authenticated", schedulePresence);
+        const presenceHeartbeat = setInterval(schedulePresence, 15000);
+        schedulePresence();
+        uiDisposables.add({
+          dispose: () => {
+            clearTimeout(presenceTimer);
+            clearInterval(presenceHeartbeat);
+            socket?.off("authenticated", schedulePresence);
+            clearHighlights();
+            activity.dispose();
+          },
+        });
+      }
       const editorService = univer.__getInjector().get(IEditorService);
       uiDisposables.add({
         dispose: bindTableFormulaFocus(host, {
@@ -354,6 +658,123 @@ export const TableDocument = observer(function TableDocument({
           session.capture(workbook.save());
         }
       };
+      const syncUndo = () => {
+        if (!collaboration || workbook.isCellEditing()) {
+          return;
+        }
+        const undo = univer.__getInjector().get(IUndoRedoService);
+        undo.clearUndoRedo(workbook.getId());
+        for (
+          let i = 0;
+          i < collaboration.undoCount + collaboration.redoCount;
+          i++
+        ) {
+          undo.pushUndoRedo({
+            unitID: workbook.getId(),
+            undoMutations: [],
+            redoMutations: [],
+          });
+        }
+        for (let i = 0; i < collaboration.redoCount; i++) {
+          undo.popUndoToRedo();
+        }
+      };
+      const applyRemote = () => {
+        if (
+          !alive ||
+          !collaboration ||
+          collaboration.conflict ||
+          applyingRemote
+        ) {
+          return;
+        }
+        if (workbook.isCellEditing() || capturePending) {
+          remotePending = true;
+          return;
+        }
+        remotePending = false;
+        applyingRemote = true;
+        try {
+          const next = collaboration.snapshot();
+          const activeSheet = workbook.getActiveSheet();
+          const cell = workbook.getActiveCell()?.getRange();
+          const position = collaboration.locate(
+            activeSheet.getSheetId(),
+            cell?.startRow ?? 0,
+            cell?.startColumn ?? 0
+          );
+          const scroll = activeSheet.getScrollState();
+          if (!patchTableCells(univerAPI, workbook, sharedSnapshot, next)) {
+            const sheetId = activeSheet.getSheetId();
+            clearHighlights();
+            univerAPI.disposeUnit(workbook.getId());
+            workbook = univerAPI.createWorkbook(next);
+            const sheet =
+              workbook.getSheetBySheetId(sheetId) ?? workbook.getActiveSheet();
+            workbook.setActiveSheet(sheet);
+            sheet.getRange(position.row, position.column).activate();
+            sheet.scrollToCell(
+              scroll.sheetViewStartRow,
+              scroll.sheetViewStartColumn
+            );
+            setEditable(editableRef.current);
+          }
+          sharedSnapshot = next;
+          collaboration.initialize(workbook.save());
+          updatePresence(collaboration.peers);
+          syncUndo();
+        } catch (error) {
+          session.reportError(error);
+        } finally {
+          applyingRemote = false;
+        }
+      };
+      if (collaboration) {
+        uiDisposables.add({
+          dispose: collaboration.subscribe(() => {
+            queueMicrotask(applyRemote);
+          }),
+        });
+        uiDisposables.add(
+          univerAPI.addEvent(univerAPI.Event.SheetEditEnded, () => {
+            if (remotePending) {
+              setTimeout(applyRemote, 0);
+            }
+          })
+        );
+        const commands = univer.__getInjector().get(ICommandService);
+        // This service is lazy and registers the default commands on first use.
+        // Initialize it before replacing the spreadsheet undo handlers.
+        univer
+          .__getInjector()
+          .get(IUndoRedoService)
+          .clearUndoRedo(workbook.getId());
+        for (const [command, direction] of [
+          [UndoCommand, "undo"],
+          [RedoCommand, "redo"],
+        ] as const) {
+          commands.unregisterCommand(command.id);
+          uiDisposables.add(
+            commands.registerCommand({
+              ...command,
+              handler: (accessor) => {
+                if (workbook.isCellEditing()) {
+                  return command.handler(accessor);
+                }
+                if (!editableRef.current || collaboration.conflict) {
+                  return false;
+                }
+                if (capturePending) {
+                  capture();
+                }
+                collaboration[direction]();
+                applyRemote();
+                return true;
+              },
+            })
+          );
+        }
+      }
       const commit = async () => {
         if (!editableRef.current) {
           return;
@@ -385,7 +806,9 @@ export const TableDocument = observer(function TableDocument({
       const guard = workbook.onBeforeCommandExecute((command, options) => {
         if (
           !editableRef.current &&
+          !applyingRemote &&
           command.type === CommandType.MUTATION &&
+          !options?.fromCollab &&
           !options?.onlyLocal &&
           !command.id.startsWith("formula.")
         ) {
@@ -395,17 +818,23 @@ export const TableDocument = observer(function TableDocument({
       const subscription = workbook.onCommandExecuted((command, options) => {
         if (
           !editableRef.current ||
+          applyingRemote ||
+          options?.fromCollab ||
           command.type !== CommandType.MUTATION ||
           options?.onlyLocal ||
           command.id.startsWith("formula.")
         ) {
           return;
         }
+        collaboration?.track(command);
         capturePending = true;
         clearTimeout(captureTimer);
         captureTimer = setTimeout(() => {
           try {
             capture();
+            if (collaboration) {
+              applyRemote();
+            }
           } catch (error) {
             session.reportError(error);
           }
@@ -436,6 +865,7 @@ export const TableDocument = observer(function TableDocument({
         setEditable,
         setDarkMode: (dark) => univerAPI.toggleDarkMode(dark),
         setScriptsAvailable: scriptMenu?.setAvailable,
+        updatePresence,
       };
       runtimeRef.current = runtime;
       if (mobile) {
@@ -518,7 +948,7 @@ export const TableDocument = observer(function TableDocument({
     return undefined;
     // A session keeps its own snapshot and revision across live model updates.
     // oxlint-disable-next-line react-hooks/exhaustive-deps
-  }, [session]);
+  }, [session, sessionLoaded]);
 
   useEffect(() => {
     runtimeRef.current?.setEditable(editable);
@@ -644,7 +1074,7 @@ export const TableDocument = observer(function TableDocument({
             placeholder={t("Untitled")}
             title={session.title || t("Untitled")}
             value={session.title}
-            readOnly={!editable}
+            readOnly={!editable || !sessionLoaded}
             onChange={(event) => session.setTitle(event.target.value)}
             onBlur={() => {
               if (editable && session.dirty && !session.conflict) {
@@ -659,6 +1089,13 @@ export const TableDocument = observer(function TableDocument({
           aria-label={t("Table tools")}
         />
         <DocumentActions>
+          {session instanceof TableCollaborationSession && (
+            <TableCollaborators
+              document={document}
+              session={session}
+              mobile={mobile}
+            />
+          )}
           {editable && mobile && cellEditing && (
             <Button neutral disabled={!ready} onClick={handleSave}>
               {t("Done")}

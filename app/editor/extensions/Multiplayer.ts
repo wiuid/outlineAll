@@ -21,6 +21,12 @@ import {
 } from "@shared/editor/lib/multiplayer";
 import { EditorStyleHelper } from "@shared/editor/styles/EditorStyleHelper";
 import { Second } from "@shared/utils/time";
+import {
+  createCollaborationAvatar,
+  observeCollaborationActivity,
+  observeCollaborationCursors,
+  type CollaborationCursorUser,
+} from "~/utils/collaborationCursor";
 
 type UserAwareness = {
   user?: {
@@ -28,6 +34,7 @@ type UserAwareness = {
   };
   anchor: object;
   head: object;
+  activity?: { editing: boolean };
 };
 
 /**
@@ -35,7 +42,7 @@ type UserAwareness = {
  */
 type MultiplayerOptions = {
   /** The local user, used for cursor presence and the persistent user/client mapping. */
-  user: { id: string; color: string };
+  user: CollaborationCursorUser;
   /** The Hocuspocus provider used for awareness and document sync. */
   provider: HocuspocusProvider;
   /** The shared Yjs document this editor is bound to. */
@@ -88,7 +95,7 @@ export default class Multiplayer extends Extension<MultiplayerOptions> {
       userClientId: number,
       aw: UserAwareness
     ) => {
-      if (currentClientId === userClientId) {
+      if (currentClientId === userClientId || aw.activity?.editing === false) {
         return false;
       }
 
@@ -141,6 +148,15 @@ export default class Multiplayer extends Extension<MultiplayerOptions> {
       yCursorPlugin(provider.awareness, {
         awarenessStateFilter,
         selectionBuilder,
+        cursorBuilder: (remote: CollaborationCursorUser) => {
+          const cursor = document.createElement("span");
+          cursor.className = EditorStyleHelper.multiplayerCursor;
+          cursor.dataset.collaborationCursor = remote.id;
+          cursor.style.borderColor = remote.color;
+          cursor.contentEditable = "false";
+          cursor.append("\u2060", createCollaborationAvatar(remote), "\u2060");
+          return cursor;
+        },
       }),
       yUndoPlugin(),
       // Facade plugin that exposes the collaboration operations to shared
@@ -151,6 +167,26 @@ export default class Multiplayer extends Extension<MultiplayerOptions> {
         props: {
           handleScrollToSelection: (view) =>
             isRemoteTransaction(view.state.tr, view.state),
+        },
+        view: (view) => {
+          const cursors = observeCollaborationCursors(view.dom);
+          const activity = observeCollaborationActivity(
+            () => view.editable && view.hasFocus(),
+            (editing) => provider.setAwarenessField("activity", { editing })
+          );
+          return {
+            update: () => {
+              activity.refresh();
+              cursors.refresh();
+            },
+            destroy: () => {
+              activity.dispose();
+              cursors.dispose();
+              if (provider.awareness.getLocalState()) {
+                provider.setAwarenessField("activity", { editing: false });
+              }
+            },
+          };
         },
       }),
     ];

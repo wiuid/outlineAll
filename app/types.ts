@@ -324,7 +324,8 @@ export type AwarenessChangeEvent = {
   states: {
     clientId: number;
     user?: { id: string };
-    cursor: Cursor;
+    cursor?: Cursor | null;
+    activity?: { editing: boolean };
     scrollY: number | undefined;
   }[];
 };

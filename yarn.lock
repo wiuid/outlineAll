@@ -17777,6 +17777,7 @@ __metadata:
     "@types/yauzl": "npm:^2.10.3"
     "@types/yazl": "npm:^3.3.1"
     "@univerjs/core": "npm:0.25.1"
+    "@univerjs/engine-formula": "npm:0.25.1"
     "@univerjs/preset-sheets-core": "npm:0.25.1"
     "@univerjs/preset-sheets-node-core": "npm:0.25.1"
     "@univerjs/presets": "npm:0.25.1"

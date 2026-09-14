@@ -485,7 +485,7 @@ export const TableScriptPanel = observer(function TableScriptPanel({
                           <p>
                             {zh
                               ? "已保存计划的下次执行："
-                              : t("Next run of the saved schedule:")}{" "}
+                              : `${t("Next run of the saved schedule")}:`}{" "}
                             {new Date(
                               session.selected.nextRunAt
                             ).toLocaleString(i18n.language, {

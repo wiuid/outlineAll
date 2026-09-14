@@ -1,21 +1,18 @@
 import { action, makeObservable, observable } from "mobx";
+import {
+  groupCollaborationMembers,
+  type CollaborationMember,
+} from "@shared/utils/collaborationPresence";
 import type { AwarenessChangeEvent } from "~/types";
 import type RootStore from "./RootStore";
 
-type DocumentPresence = Map<
-  string,
-  {
-    isEditing: boolean;
-    userId: string;
-  }
->;
+type DocumentPresence = Map<string, CollaborationMember>;
 
 export default class PresenceStore {
   @observable
   data: Map<string, DocumentPresence> = new Map();
 
-  constructor(rootStore: RootStore) {
-    this.rootStore = rootStore;
+  constructor(_rootStore?: RootStore) {
     makeObservable(this);
   }
 
@@ -38,36 +35,51 @@ export default class PresenceStore {
    * Updates the presence store based on an awareness event from YJS
    *
    * @param documentId ID of the document the event is for
-   * @param clientId ID of the client the event is for
    * @param event The awareness event
    */
-  public updateFromAwarenessChangeEvent(
+  @action public updateFromAwarenessChangeEvent(
     documentId: string,
-    clientId: number,
     event: AwarenessChangeEvent
   ) {
-    const presence = this.data.get(documentId);
-    let existingUserIds = (presence ? Array.from(presence.values()) : []).map(
-      (p) => p.userId
+    const members = groupCollaborationMembers(
+      event.states.flatMap((state) =>
+        state.user
+          ? [
+              {
+                clientId: String(state.clientId),
+                userId: state.user.id,
+                isEditing: !!state.cursor && (state.activity?.editing ?? true),
+              },
+            ]
+          : []
+      )
     );
+    const previous = this.data.get(documentId);
+    if (
+      previous?.size === members.length &&
+      members.every((member) => {
+        const existing = previous.get(member.userId);
+        return (
+          existing?.isEditing === member.isEditing &&
+          existing.connections === member.connections
+        );
+      })
+    ) {
+      return;
+    }
+    this.data.set(
+      documentId,
+      new Map(members.map((member) => [member.userId, member]))
+    );
+  }
 
-    event.states.forEach((state) => {
-      const { user, cursor } = state;
-
-      // To avoid loops we only want to update the presence for the current user
-      // if it is also the current client.
-      const isCurrentUser = this.rootStore.auth.currentUserId === user?.id;
-      const isCurrentClient = clientId === state.clientId;
-
-      if (user && (!isCurrentUser || !isCurrentClient)) {
-        this.update(documentId, user.id, !!cursor);
-        existingUserIds = existingUserIds.filter((id) => id !== user.id);
-      }
-    });
-
-    existingUserIds.forEach((userId) => {
-      this.leave(documentId, userId);
-    });
+  /**
+   * Clears a document's live roster when its connection closes or its editor unmounts.
+   *
+   * @param documentId the document whose connection ended.
+   */
+  @action public clearDocument(documentId: string): void {
+    this.data.delete(documentId);
   }
 
   /**
@@ -111,6 +123,8 @@ export default class PresenceStore {
       presence.set(userId, {
         isEditing,
         userId,
+        connections: 1,
+        locations: [],
       });
       this.data.set(documentId, presence);
     }
@@ -123,11 +137,13 @@ export default class PresenceStore {
   @action
   public clear() {
     this.data.clear();
+    for (const timeout of this.timeouts.values()) {
+      clearTimeout(timeout);
+    }
+    this.timeouts.clear();
   }
 
   private timeouts: Map<string, ReturnType<typeof setTimeout>> = new Map();
 
   private offlineTimeout = 30000;
-
-  private rootStore: RootStore;
 }

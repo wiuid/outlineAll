@@ -6,7 +6,8 @@ import {
   NotFoundError,
   ValidationError,
 } from "@server/errors";
-import { Event, Document } from "@server/models";
+import { Event, Document, TableCollaboration } from "@server/models";
+import { publishTableChange } from "./tableCollaborativeUpdater";
 import { DocumentHelper } from "@server/models/helpers/DocumentHelper";
 import { TextHelper } from "@server/models/helpers/TextHelper";
 import { sequelize } from "@server/storage/database";
@@ -172,6 +173,17 @@ export default async function documentUpdater(
       editMode,
       findText
     );
+    // An explicit whole-document replacement starts a new collaboration epoch.
+    // Old browser updates must never be merged into the replacement snapshot.
+    const removed = await TableCollaboration.destroy({
+      where: { documentId: document.id },
+      transaction,
+    });
+    if (removed) {
+      transaction.afterCommit(() =>
+        publishTableChange(document.id, document.revisionCount)
+      );
+    }
   }
 
   const changed = document.changed();

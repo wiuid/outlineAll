@@ -20,7 +20,13 @@ import { parseAuthentication } from "./authentication";
 export function attachCSRFToken() {
   return async function attachCSRFTokenMiddleware(ctx: AppContext, next: Next) {
     // Only attach tokens for safe methods that don't mutate state
-    if (["GET", "HEAD", "OPTIONS"].includes(ctx.method)) {
+    const existing = getTokenFromCookie(ctx);
+    if (
+      ["GET", "HEAD", "OPTIONS"].includes(ctx.method) &&
+      (!existing || !unbundleToken(existing, env.SECRET_KEY).valid)
+    ) {
+      // Keep a valid host-bound token stable across concurrent loads and tabs.
+      // Rotating it on every GET races with POSTs that already read the cookie.
       const raw = generateRawToken(16);
       const bundled = bundleToken(raw, env.SECRET_KEY);
 
