@@ -544,3 +544,12 @@
 - 提交检查发现既有脚本面板的英文“下次执行”标签末尾冒号被翻译提取器识别为命名空间，额外生成的空命名空间覆盖英文词库。已将该冒号移到翻译调用之外，显示内容保持一致，并重新自动提取词库；不手写翻译条目。检查过程中的无关锁文件去重已恢复至原验收版本。
 - 修复后 `yarn build:i18n` 正常生成 2026 条英文词条，原有保留词条的翻译值均未改变；仅自动移除两条源码已不再使用的文档创建词条。`yarn install --immutable`、TypeScript、完整 lint、格式及 whitespace 检查通过，i18n、脚本会话与 Cron 的 4 files / 52 tests 通过，日志为 `/tmp/codex-github-main-{types,lint,tests}.log`。
 - 本次操作范围为 Git 提交和 GitHub 分支同步，不执行 kb 发布、数据库迁移或正式服务变更。
+
+## 2026-09-14 Codex (普通复制的代码围栏与转义修复)
+- 用户在讨论后明确要求修复“选中代码块的部分内容复制时出现 Markdown 围栏”和“减号等特殊字符被额外加反斜杠”。本轮在 `main` / `5ea1e63de` 上继续，修改前工作树干净；先运行复制、Markdown 序列化与标题编号的基线，Node/jsdom 共 6 个 project-files / 58 tests 通过。
+- 普通复制改用独立的节点/标记序列化规则：代码块直接输出所选原文，普通文本不做 Markdown 转义，不再对生成的整段文本做正则替换或 trim。代码注释、路径、正则、原有反斜杠/反引号、缩进和首尾换行保留；字面量链接、HTML 与高亮标记也不会被误删。真正的链接、高亮和颜色仍按原有复制规则移除格式，标题编号、列表减号、加粗及富文本剪贴板规则保留。
+- Markdown 导出继续使用原序列化器，保留合法围栏和转义；原序列化器仅补齐可复用节点/标记配置的类型声明，没有修改导出执行逻辑。回归检查复制前后的文档模型与 Markdown 导出结果不变。
+- 最终 TypeScript、完整 lint、4 个相关源码/测试文件的 oxfmt 检查及 Git whitespace 检查通过。相关测试共 6 个 project-files / 98 tests 通过，覆盖部分代码、空白选区、混合文本、特殊符号、格式保留和导出隔离；日志为 `/tmp/codex-document-copy-{baseline,final-tests,types,lint}.log`。
+- 测试站使用专用文档 `https://doc.webraa.com/doc/20260914-eV2pB1paNW` 完成 9 组 Chromium 验收，通过原生 Ctrl+C 读取实际纯文本/HTML 剪贴板。代码部分/整块、路径和符号、列表加粗、链接文字、标题编号均通过；临时将编辑器视图设为只读后的复制也通过，不将其声称为新增权限验收。复制前后文档内容、revision 和 API Markdown 导出一致，pageerror 与意外 HTTP 错误均为 0。
+- 成功结果及截图位于 `/tmp/codex-document-copy-preview/browser.json`、`document.png`；浏览器临时入口为 `/tmp/codex-doc-browser/browser.cjs document-copy`。首轮浏览器用例把实际高亮节点误当作字面量，修正测试预期后完成上述成功验收，未据此修改产品逻辑。测试会话过期后通过既有测试工具刷新，凭据未输出或提交。
+- `doc.webraa.com` 的 Vite 服务直接提供当前源码，刷新可验证；没有修改正式 kb、数据库结构或部署配置，没有提交或推送本轮改动，没有新建 Markdown 文件。

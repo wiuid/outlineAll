@@ -2,6 +2,11 @@
 // @ts-nocheck
 // https://raw.githubusercontent.com/ProseMirror/prosemirror-markdown/master/src/to_markdown.js
 // forked for table support
+import type {
+  Fragment,
+  Mark,
+  Node as ProsemirrorNode,
+} from "prosemirror-model";
 
 /** Options that control how a ProseMirror document is serialized to Markdown. */
 type Options = {
@@ -16,9 +21,39 @@ type Options = {
   commonMark?: boolean;
 };
 
+type NodeSerializer = (
+  state: MarkdownSerializerState,
+  node: ProsemirrorNode,
+  parent: ProsemirrorNode | Fragment,
+  index: number
+) => void;
+
+type MarkBoundary =
+  | string
+  | ((
+      state: MarkdownSerializerState,
+      mark: Mark,
+      parent: ProsemirrorNode,
+      index: number
+    ) => string);
+
+interface SerializedMark {
+  open: MarkBoundary;
+  close: MarkBoundary;
+  mixable?: boolean;
+  escape?: boolean;
+  expelEnclosingWhitespace?: boolean;
+}
+
 // ::- A specification for serializing a ProseMirror document as
 // Markdown/CommonMark text.
 export class MarkdownSerializer {
+  /** The node renderers, which can be reused by a separate clipboard serializer. */
+  nodes: Record<string, NodeSerializer>;
+
+  /** The mark renderers, which can be reused without changing document export. */
+  marks: Record<string, () => SerializedMark>;
+
   // :: (Object<(state: MarkdownSerializerState, node: Node, parent: Node, index: number)>, Object)
   // Construct a serializer with the given configuration. The `nodes`
   // object should map node names in a given schema to function that

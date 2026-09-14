@@ -2,13 +2,12 @@ import { Plugin, PluginKey } from "prosemirror-state";
 import type { EditorView } from "prosemirror-view";
 import Extension from "@shared/editor/lib/Extension";
 import {
+  createClipboardTextSerializer,
   sanitizeClipboardHTML,
-  sanitizeClipboardMarkdown,
 } from "@shared/editor/lib/markdown/clipboardSerializer";
 
 /**
- * A plugin that allows overriding the default behavior of the editor to allow
- * copying text including the markdown formatting.
+ * Copies selected source text with the document's clipboard formatting rules.
  */
 export default class ClipboardTextSerializer extends Extension {
   get name() {
@@ -29,10 +28,7 @@ export default class ClipboardTextSerializer extends Extension {
           handleDOMEvents: {
             copy: this.handleCopy,
           },
-          clipboardTextSerializer: (slice) =>
-            sanitizeClipboardMarkdown(
-              mdSerializer.serialize(slice.content, { commonMark: true })
-            ),
+          clipboardTextSerializer: createClipboardTextSerializer(mdSerializer),
         },
       }),
     ];
