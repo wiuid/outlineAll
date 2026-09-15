@@ -22,6 +22,7 @@ import {
   Ribbon,
   ScrollToCellOperation,
   SheetCellEditorResizeService,
+  SheetInterceptorService,
   WorkbookPermissionService,
 } from "@univerjs/preset-sheets-core";
 import enUS from "@univerjs/preset-sheets-core/locales/en-US";
@@ -72,6 +73,7 @@ import { TABLE_SAVE_PROMPT, tableSaves } from "~/stores/TableSaveCoordinator";
 import { download } from "~/utils/download";
 import { documentPath } from "~/utils/routeHelpers";
 import { bindTableFormulaFocus } from "~/utils/tableFormulaFocus";
+import { registerTableMultilineEditing } from "~/utils/tableMultiline";
 import {
   bindTableMobileInput,
   observeTableViewport,
@@ -320,6 +322,11 @@ export const TableDocument = observer(function TableDocument({
         host.remove();
       };
       let workbook = univerAPI.createWorkbook(session.table.workbook);
+      uiDisposables.add(
+        registerTableMultilineEditing(
+          univer.__getInjector().get(SheetInterceptorService)
+        )
+      );
       const collaboration =
         session instanceof TableCollaborationSession ? session : undefined;
       let sharedSnapshot =
