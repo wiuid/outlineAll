@@ -590,3 +590,11 @@
 - 新增 `app/utils/tableAutoFit.test.ts` 共 8 项，覆盖连续/不连续行列、全选、选区外边界、轴隔离、范围合并不变性及协同回放隔离。最终表格相关 8 个 project-files / 87 tests 全部通过，TypeScript `yarn tsc --noEmit`、完整 `yarn lint`、3 个相关文件 oxfmt 和 Git whitespace 检查通过；独立 Vite 构建成功，产物仅在 `/tmp/codex-table-autofit/frontend`，保留既有 sourcemap/大 chunk 提示。
 - 测试站使用真实鼠标双击完成连续多列和多行验收：三列分别得到不同内容宽度；包含 3、4、5 行文字的三行分别得到 53、70、87px。一次撤销恢复整批行高，Ctrl+Y 重做恢复；保存后第二窗口尺寸一致，另一端实时收到批量列宽变化，刷新后仍保持。最终 pageerror 与 HTTP 错误均为 0。全选及不连续范围通过命令层测试覆盖；自动化对左上角全选按钮和 Ctrl 多选的画布坐标不够稳定，不将其计入真实鼠标验收。
 - 验收表为 `https://doc.webraa.com/doc/5ym5ye75om56yep6ieq6ycc5bqu6aqm5ps2-Sc8bqKb9wh`，结果及截图在 `/tmp/codex-table-autofit/browser.json`、`autofit.png`；临时脚本为 `/tmp/codex-doc-browser/table-autofit.cjs`。测试会话过期后仅用既有工具刷新，未输出或提交凭据。测试站 Vite 已直接提供当前源码，正式 kb 仍为 `9da2c1e13`。
+
+## 2026-09-19 Codex (批量自适应发布到 kb 正式站)
+- 用户明确要求推送正式环境。功能与记录先提交为 `1da98410c`；GitHub main 同期新增 `113e078f7`（仅 README 一行），普通推送被拒绝后先 fetch 核查，使用非交互 rebase 完整保留远端提交，最终功能提交为 `c498447561b19dd7b4d786a1151da5d6be40891d`，已普通推送 main。没有强推、丢弃或覆盖远端历史。
+- 从最终不可变提交隔离构建后端、自动提取翻译和前端，全部通过。正式镜像为 `webra/outline:autofit-c49844756` / `sha256:1f151568c1ac95f5306044e7f3cf38682ffb5af553580e2f521a55f31a6418de`，基于原正式 `webra/outline:multiline-9da2c1e13`，依赖未变。镜像内离线公式计算结果 5、10 正常；新旧迁移清单一致，正式库待迁移为 0，本次未执行迁移。
+- 正式备份 `/data/outline/backups/20260919T141146Z-autofit-c49844756`，目录 0700、敏感文件 0600；PostgreSQL custom 备份 2,073,266 字节，SHA256 `12cdd853dbb3b26cfd30f277a09f73789643703c1e3d7556746e226cfba535d7`，pg_restore 清单验证通过。旧镜像 `sha256:165d6b0d848cf58a09a931681a494bc490dbe7d0c817869f3ed3576bc0e7c226`、旧 Compose 和回滚工具已保留。
+- `https://kb.webraa.com` 于 **2026-09-19 14:12:43 UTC** 完成切换。应用、脚本运行器和调度均 healthy，公网健康及实际 JS 与构建校验和通过；PostgreSQL、Redis 容器 ID 未变，执行器镜像、权限、挂载和隔离保持原配置。固定合成运行器检查通过认证、rootless gVisor、公网请求与私网阻断，没有执行用户脚本、写正式文档或发送机器人消息。
+- 候选镜像使用测试数据库通过私有 Unix socket 健康检查；生产构建不提供 Vite 源码模块，临时注入 `TableDocument.tsx` 调试对象的候选浏览器脚本因此不能运行，未将此工具限制当作产品失败。候选镜像绑定同一提交及已通过的真实测试站结果：连续多选行列、原生多行高度、撤销/重做、保存、刷新和双窗口协同，最终 pageerror/HTTP 错误为 0；上线后实际静态资源哈希与候选构建一致。
+- 发布证据在 `/tmp/codex-kb-release-c49844756/`：`browser-acceptance.json`、`runtime-acceptance.json`、`production-acceptance.json`、`deployed.json`、`backup.json` 和构建日志；工具为同目录 `release.py` / `operations.py`。临时预检容器已停止，最终正式镜像 revision 为 `c49844756` 且 healthy。没有新建 Markdown 文件、提交凭据或临时产物。
