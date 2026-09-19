@@ -23,6 +23,7 @@ import {
   ScrollToCellOperation,
   SheetCellEditorResizeService,
   SheetInterceptorService,
+  SheetsSelectionsService,
   WorkbookPermissionService,
 } from "@univerjs/preset-sheets-core";
 import enUS from "@univerjs/preset-sheets-core/locales/en-US";
@@ -73,6 +74,7 @@ import { TABLE_SAVE_PROMPT, tableSaves } from "~/stores/TableSaveCoordinator";
 import { download } from "~/utils/download";
 import { documentPath } from "~/utils/routeHelpers";
 import { bindTableFormulaFocus } from "~/utils/tableFormulaFocus";
+import { bindTableAutoFit } from "~/utils/tableAutoFit";
 import { registerTableMultilineEditing } from "~/utils/tableMultiline";
 import {
   bindTableMobileInput,
@@ -322,6 +324,22 @@ export const TableDocument = observer(function TableDocument({
         host.remove();
       };
       let workbook = univerAPI.createWorkbook(session.table.workbook);
+      uiDisposables.add(
+        bindTableAutoFit(univer.__getInjector().get(ICommandService), () => {
+          const worksheet = workbook.getWorkbook().getActiveSheet();
+          if (!worksheet) {
+            return;
+          }
+          return {
+            worksheet,
+            ranges: univer
+              .__getInjector()
+              .get(SheetsSelectionsService)
+              .getCurrentSelections()
+              .map((selection) => selection.range),
+          };
+        })
+      );
       uiDisposables.add(
         registerTableMultilineEditing(
           univer.__getInjector().get(SheetInterceptorService)

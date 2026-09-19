@@ -582,3 +582,11 @@
 - 正式站 `https://kb.webraa.com` 于 **2026-09-15 03:19:35 UTC** 切换完成。应用、脚本运行器和调度均 healthy，SOURCE_COMMIT 与镜像标签一致；PostgreSQL、Redis 容器 ID 未变，脚本执行器镜像/权限/挂载保持原配置。公网健康和首页 JS 校验和通过，调度无异常告警；固定合成运行器样例通过认证、隔离、公网请求和私网阻断检查，没有执行用户脚本、写正式文档或发送机器人消息。
 - 发布前使用新镜像的私有 Unix socket 和测试数据库，发布后使用 kb 公网实际前端文件配合相同测试后端，均完成原始 API 多行值的 F2 编辑、Ctrl+S 持久保存、刷新后二次编辑保存；最终浏览器错误和 HTTP 错误为 0。只修改专用验收表 `a4885638-1bf8-4818-aef5-c5efc681da52` 的 A9；没有将测试写请求发送到正式后端。预检中测试会话过期后已刷新，Unix socket 代理补齐 IP 请求头，并等待服务端保存完成后断言；未据此修改产品代码。
 - 成功证据在 `/tmp/codex-kb-release-9da2c1e13/` 的 `browser-acceptance.json`、`browser-live.json`、`runtime-acceptance.json`、`production-acceptance.json`、`deployed.json`、`completed.json` 和截图；发布/回滚工具为同目录 `release.py` / `operations.py`，已归档备份目录。临时预检容器已停止，doc 与 kb 健康检查均通过。没有新建 Markdown 文件、提交凭据或构建产物；本节仅记录部署，不改变已上线代码版本。
+
+## 2026-09-19 Codex (多选行列双击批量自适应)
+- 用户讨论后要求落实：多选列双击标题边界时分别按内容自适应宽度，多选行时分别按内容自适应高度，并覆盖全选、撤销、保存和协同。本轮从 `main` / `587520906` 开始，保留全部已有修改；修改前表格编辑、工作簿和协同 5 个 project-files / 51 tests 通过。没有修改正式环境、依赖、数据库结构或 node_modules，没有提交或推送。
+- 新增 `app/utils/tableAutoFit.ts`，在 Univer 原生列宽/行高命令执行前，将标题双击传入的单行或单列范围扩展到包含该边界的当前行/列选区；全选映射到完整工作表。重叠或相邻选区合并，双击选区外的边界保持原单行/列范围。计算内容尺寸、权限检查、mutations、undo/redo 继续由 Univer 原生命令负责，现有保存和 Yjs 协同继续捕获原生尺寸 mutations。
+- `TableDocument.tsx` 在工作簿创建后注册该命令适配器，并随当前 Univer 实例统一释放。无需自定义网格、尺寸算法或替换 Univer 交互。多选各行/列得到各自尺寸，不强制等宽/等高；多行普通值先由上一节的原生段落兼容层进入测量，所以 AI/API 换行内容能够撑开行高。
+- 新增 `app/utils/tableAutoFit.test.ts` 共 8 项，覆盖连续/不连续行列、全选、选区外边界、轴隔离、范围合并不变性及协同回放隔离。最终表格相关 8 个 project-files / 87 tests 全部通过，TypeScript `yarn tsc --noEmit`、完整 `yarn lint`、3 个相关文件 oxfmt 和 Git whitespace 检查通过；独立 Vite 构建成功，产物仅在 `/tmp/codex-table-autofit/frontend`，保留既有 sourcemap/大 chunk 提示。
+- 测试站使用真实鼠标双击完成连续多列和多行验收：三列分别得到不同内容宽度；包含 3、4、5 行文字的三行分别得到 53、70、87px。一次撤销恢复整批行高，Ctrl+Y 重做恢复；保存后第二窗口尺寸一致，另一端实时收到批量列宽变化，刷新后仍保持。最终 pageerror 与 HTTP 错误均为 0。全选及不连续范围通过命令层测试覆盖；自动化对左上角全选按钮和 Ctrl 多选的画布坐标不够稳定，不将其计入真实鼠标验收。
+- 验收表为 `https://doc.webraa.com/doc/5ym5ye75om56yep6ieq6ycc5bqu6aqm5ps2-Sc8bqKb9wh`，结果及截图在 `/tmp/codex-table-autofit/browser.json`、`autofit.png`；临时脚本为 `/tmp/codex-doc-browser/table-autofit.cjs`。测试会话过期后仅用既有工具刷新，未输出或提交凭据。测试站 Vite 已直接提供当前源码，正式 kb 仍为 `9da2c1e13`。
