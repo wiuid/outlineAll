@@ -605,3 +605,8 @@
 - 测试站验证：移动端原生 textarea 部分选择、换行保存与刷新持久化通过；整行/整列触摸拖选范围正确；同页双表格视图使用不同 client ID，关闭分屏后旧订阅清理且单窗格恢复在线名单。多人协同完整脚本通过 17 组检查，含公式、同格并发、离线合并、撤销、IME、工作表管理、深浅主题、移动端同步及 API 新 epoch，pageerror 和意外 HTTP 错误为 0。API read/旧 revision 409 再次核对通过。
 - 最终前端生产构建、TypeScript、完整 lint、17 个文件 oxfmt 与 `git diff --check` 通过；前端 53 tests、数据库/WebSocket 13 tests 通过。构建仅有既有大 chunk 提示。自动化移动端为 Chromium 模拟，不等同于小米 Chrome/Via 实机软键盘验收。
 - 后续交付动作：核对并提交当前 260920 修改，再决定是否推送和发布正式环境；本轮没有取得发布授权，也没有执行发布。
+
+## 2026-09-23 Codex (260920 发布到 kb 正式站)
+- 用户明确要求推到线上。稳定性修改提交 `df43856830100d1643833bc3e33c0baf01aecbbd` 已普通快进推送 GitHub main；从该不可变提交隔离构建后端、翻译与前端，候选镜像 `webra/outline:stability-df4385683` / `sha256:680ceb812e1de7298d5238c06a5ea6daebfe3060cefa37fb0154cd9d99751368` 基于原正式 `webra/outline:autofit-c49844756`。依赖和迁移文件未变，正式待迁移为 0。
+- 切换前测试数据库预览和正式资源浏览器验收通过：表格 API 读取、桌面/手机渲染、单行底栏、同页分屏关闭；pageerror、意外 HTTP 错误和文档写入均为 0。离线公式结果 5、10 正常。正式备份 `/data/outline/backups/20260923T160102Z-stability-df4385683`，PostgreSQL custom dump 2,106,735 字节，SHA256 `6cd8d8969f0a91ae272c50412e52b1572dc64788e610210c0a7442053944096b`，pg_restore 清单已验证；旧 Compose、凭据与回滚工具一并保留。
+- `https://kb.webraa.com` 于 2026-09-23 16:02:14 UTC 切换。应用、运行器、调度均 healthy；公网 JS 与构建哈希一致；数据库和 Redis 容器保持原 ID。固定合成运行器通过认证、rootless gVisor、公网请求和私网阻断检查，没有执行用户脚本或写正式文档。发布后正式 JS 配合测试库的浏览器检查通过；私有预览容器已停止，正式和测试站健康检查均为 OK。证据与发布/回滚工具保存在 `/tmp/codex-kb-release-df4385683` 和备份目录。小米 Chrome/Via 实机软键盘仍未由真实设备验收。
