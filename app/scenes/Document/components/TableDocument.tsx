@@ -5,12 +5,14 @@ import {
   DOCS_FORMULA_BAR_EDITOR_UNIT_ID_KEY,
   DOCS_NORMAL_EDITOR_UNIT_ID_KEY,
   LocaleType,
+  RANGE_TYPE,
   ICommandService,
   IUndoRedoService,
   UndoCommand,
   RedoCommand,
   type IDisposable,
 } from "@univerjs/core";
+import { Vector2 } from "@univerjs/engine-render";
 import {
   BuiltInUIPart,
   DocSelectionManagerService,
@@ -23,6 +25,7 @@ import {
   ScrollToCellOperation,
   SheetCellEditorResizeService,
   SheetInterceptorService,
+  SheetSkeletonManagerService,
   SheetsSelectionsService,
   WorkbookPermissionService,
 } from "@univerjs/preset-sheets-core";
@@ -31,7 +34,8 @@ import zhCN from "@univerjs/preset-sheets-core/locales/zh-CN";
 import { createUniver } from "@univerjs/presets";
 import "@univerjs/preset-sheets-core/lib/index.css";
 import { observer } from "mobx-react";
-import { MenuIcon } from "outline-icons";
+import { CloseIcon, MenuIcon } from "outline-icons";
+import { v4 as uuid } from "uuid";
 import {
   lazy,
   Suspense,
@@ -46,6 +50,7 @@ import { createPortal } from "react-dom";
 import { useTranslation } from "react-i18next";
 import { Prompt, useHistory } from "react-router-dom";
 import styled, { createGlobalStyle, useTheme } from "styled-components";
+import { DocumentValidation } from "@shared/validations";
 import { isTouchDevice } from "@shared/utils/browser";
 import {
   TableRosterSchema,
@@ -58,6 +63,7 @@ import {
 import Button from "~/components/Button";
 import ConfirmationDialog from "~/components/ConfirmationDialog";
 import PageTitle from "~/components/PageTitle";
+import { useSplitView } from "~/components/SplitView/context";
 import useStores from "~/hooks/useStores";
 import { TableDocumentMenu } from "~/menus/TableDocumentMenu";
 import { WebsocketContext } from "~/components/WebsocketProvider";
@@ -72,12 +78,16 @@ import {
 } from "~/stores/TableDocumentSession";
 import { TABLE_SAVE_PROMPT, tableSaves } from "~/stores/TableSaveCoordinator";
 import { download } from "~/utils/download";
+import appHistory from "~/utils/history";
 import { documentPath } from "~/utils/routeHelpers";
+import { closeSplitPane } from "~/utils/splitView";
 import { bindTableFormulaFocus } from "~/utils/tableFormulaFocus";
 import { bindTableAutoFit } from "~/utils/tableAutoFit";
 import { registerTableMultilineEditing } from "~/utils/tableMultiline";
 import {
+  bindTableMobileHeaderSelection,
   bindTableMobileInput,
+  createTableMobileTextEditor,
   observeTableViewport,
 } from "~/utils/tableMobile";
 import {
@@ -133,6 +143,7 @@ export const TableDocument = observer(function TableDocument({
   const { t, i18n } = useTranslation();
   const theme = useTheme();
   const history = useHistory();
+  const { isSplitView, pane } = useSplitView();
   const socket = useContext(WebsocketContext);
   // Keep the same runtime when a phone rotates or its keyboard opens.
   const [mobile] = useState(isTouchDevice);
@@ -146,8 +157,16 @@ export const TableDocument = observer(function TableDocument({
   const workspaceRef = useRef<HTMLDivElement>(null);
   const titleRef = useRef<HTMLInputElement>(null);
   const runtimeRef = useRef<TableRuntime>();
+  const sessionUseCountsRef = useRef(
+    new Map<TableDocumentSession | TableCollaborationSession, number>()
+  );
+  const [collaborationClientId] = useState(() => uuid());
   const [ready, setReady] = useState(false);
   const [cellEditing, setCellEditing] = useState(false);
+  const [editorError, setEditorError] = useState(false);
+  const reportEditorError = useCallback((_error: unknown) => {
+    setEditorError(true);
+  }, []);
   const scriptSession = tableScripts.getSession(document.id);
   const [scriptMaximized, setScriptMaximized] = useState(false);
   const scriptTrigger = useRef<Element | null>(null);
@@ -213,6 +232,22 @@ export const TableDocument = observer(function TableDocument({
     !(session instanceof TableCollaborationSession) || session.loaded;
 
   useEffect(() => {
+    const useCounts = sessionUseCountsRef.current;
+    useCounts.set(session, (useCounts.get(session) ?? 0) + 1);
+    return () => {
+      queueMicrotask(() => {
+        const nextCount = (useCounts.get(session) ?? 1) - 1;
+        if (nextCount > 0) {
+          useCounts.set(session, nextCount);
+          return;
+        }
+        useCounts.delete(session);
+        session.dispose();
+      });
+    };
+  }, [session]);
+
+  useEffect(() => {
     if (!(session instanceof TableCollaborationSession)) {
       return;
     }
@@ -222,7 +257,10 @@ export const TableDocument = observer(function TableDocument({
       });
     };
     const watch = () => {
-      socket?.emit("table.watch", { documentId: document.id });
+      socket?.emit("table.watch", {
+        documentId: document.id,
+        clientId: collaborationClientId,
+      });
       refresh();
     };
     const changed = (event: { documentId: string }) => {
@@ -264,7 +302,10 @@ export const TableDocument = observer(function TableDocument({
     const interval = setInterval(refresh, 15000);
     return () => {
       clearInterval(interval);
-      socket?.emit("table.unwatch");
+      socket?.emit("table.unwatch", {
+        documentId: document.id,
+        clientId: collaborationClientId,
+      });
       socket?.off("authenticated", watch);
       socket?.off("table.changed", changed);
       socket?.off("table.revoked", revoked);
@@ -272,9 +313,8 @@ export const TableDocument = observer(function TableDocument({
       socket?.off("disconnect", disconnected);
       window.removeEventListener("online", watch);
       window.removeEventListener("focus", refresh);
-      session.dispose();
     };
-  }, [document, session, socket]);
+  }, [collaborationClientId, document, session, socket]);
 
   const handleSave = useCallback(async () => {
     try {
@@ -283,9 +323,11 @@ export const TableDocument = observer(function TableDocument({
       }
       await runtimeRef.current?.flush();
     } catch (error) {
-      session.reportError(error);
+      if (!session.error) {
+        reportEditorError(error);
+      }
     }
-  }, [session]);
+  }, [reportEditorError, session]);
 
   useTableSaveShortcut(handleSave);
 
@@ -301,6 +343,7 @@ export const TableDocument = observer(function TableDocument({
     let capturePending = false;
     let applyingRemote = false;
     let remotePending = false;
+    let commitMobileTextEditor = () => {};
     const uiDisposables = new DisposableCollection();
     const host = container.ownerDocument.createElement("div");
     host.className = "outline-univer-host";
@@ -522,6 +565,7 @@ export const TableDocument = observer(function TableDocument({
           workbook.getActiveCell()?.getRange();
         socket.emit("table.presence", {
           documentId: document.id,
+          clientId: collaborationClientId,
           selection:
             !collaboration.conflict && range
               ? (collaboration.selection(
@@ -626,7 +670,117 @@ export const TableDocument = observer(function TableDocument({
           univer.__getInjector().get(IMenuManagerService)
         );
         const input = bindTableMobileInput(host);
+        const textEditor = createTableMobileTextEditor(host);
+        commitMobileTextEditor = textEditor.commit;
         uiDisposables.add(input);
+        uiDisposables.add(textEditor);
+        let headerCanvas: HTMLCanvasElement | undefined;
+        let disposeHeaderSelection = () => {};
+        const bindHeaderSelection = () => {
+          const render = univer
+            .__getInjector()
+            .get(IRenderManagerService)
+            .getRenderById(workbook.getId());
+          const canvas = render?.engine.getCanvasElement();
+          if (!render || !canvas || canvas === headerCanvas) {
+            return;
+          }
+          disposeHeaderSelection();
+          headerCanvas = canvas;
+          const skeletons = render.with(SheetSkeletonManagerService);
+          disposeHeaderSelection = bindTableMobileHeaderSelection(canvas, {
+            getTarget: (clientX, clientY, axis) => {
+              const skeleton = skeletons.getCurrentSkeleton();
+              if (!skeleton) {
+                return;
+              }
+              const bounds = canvas.getBoundingClientRect();
+              let offsetX = clientX - bounds.left;
+              let offsetY = clientY - bounds.top;
+              const rowHeader = skeleton.rowHeaderWidthAndMarginLeft;
+              const columnHeader = skeleton.columnHeaderHeightAndMarginTop;
+              const targetAxis =
+                axis ??
+                (offsetX < rowHeader && offsetY >= columnHeader
+                  ? "row"
+                  : offsetY < columnHeader && offsetX >= rowHeader
+                    ? "column"
+                    : undefined);
+              if (!targetAxis) {
+                return;
+              }
+              if (targetAxis === "row") {
+                offsetX = Math.max(1, rowHeader / 2);
+                offsetY = Math.min(
+                  Math.max(columnHeader + 1, offsetY),
+                  bounds.height - 1
+                );
+              } else {
+                offsetX = Math.min(
+                  Math.max(rowHeader + 1, offsetX),
+                  bounds.width - 1
+                );
+                offsetY = Math.max(1, columnHeader / 2);
+              }
+              const point = render.scene.getCoordRelativeToViewport(
+                Vector2.FromArray([offsetX, offsetY])
+              );
+              const scroll = render.scene.getScrollXYInfoByViewport(point);
+              const { scaleX, scaleY } = render.scene.getAncestorScale();
+              const cell = skeleton.getCellWithCoordByOffset(
+                point.x,
+                point.y,
+                scaleX,
+                scaleY,
+                scroll
+              );
+              if (!cell) {
+                return;
+              }
+              return {
+                axis: targetAxis,
+                index:
+                  targetAxis === "row" ? cell.actualRow : cell.actualColumn,
+              };
+            },
+            select: (axis, first, last) => {
+              const sheet = workbook.getActiveSheet();
+              const start = Math.min(first, last);
+              const end = Math.max(first, last);
+              const range =
+                axis === "row"
+                  ? {
+                      startRow: start,
+                      endRow: end,
+                      startColumn: 0,
+                      endColumn: sheet.getMaxColumns() - 1,
+                      rangeType: RANGE_TYPE.ROW,
+                    }
+                  : {
+                      startRow: 0,
+                      endRow: sheet.getMaxRows() - 1,
+                      startColumn: start,
+                      endColumn: end,
+                      rangeType: RANGE_TYPE.COLUMN,
+                    };
+              univer
+                .__getInjector()
+                .get(SheetsSelectionsService)
+                .setSelections(workbook.getId(), sheet.getSheetId(), [
+                  { range, primary: null, style: null },
+                ]);
+            },
+          });
+        };
+        const headerObserver = new MutationObserver(bindHeaderSelection);
+        headerObserver.observe(host, { childList: true, subtree: true });
+        bindHeaderSelection();
+        uiDisposables.add({
+          dispose: () => {
+            headerObserver.disconnect();
+            disposeHeaderSelection();
+          },
+        });
         uiDisposables.add(
           univerAPI.addEvent(univerAPI.Event.BeforeSheetEditStart, (event) => {
             if (!editableRef.current) {
@@ -644,6 +798,57 @@ export const TableDocument = observer(function TableDocument({
         uiDisposables.add(
           univerAPI.addEvent(univerAPI.Event.SheetEditEnded, () => {
             input.setEditing(false);
+          })
+        );
+        uiDisposables.add(
+          univerAPI.addEvent(univerAPI.Event.SheetEditStarted, (event) => {
+            const range = event.worksheet.getRange(event.row, event.column);
+            const cell = range.getCellData();
+            if (
+              cell?.f ||
+              cell?.p ||
+              cell?.si ||
+              (cell?.v !== null &&
+                cell?.v !== undefined &&
+                typeof cell.v !== "string")
+            ) {
+              return;
+            }
+            const bridge = univer.__getInjector().get(IEditorBridgeService);
+            const layout = bridge.getEditCellLayout();
+            const canvas = host.querySelector<HTMLCanvasElement>(
+              '[id^="univer-sheet-main-canvas_"]'
+            );
+            if (!layout || !canvas) {
+              return;
+            }
+            const position = layout.position;
+            const getBounds = () => {
+              const canvasBounds = canvas.getBoundingClientRect();
+              return new DOMRect(
+                canvasBounds.left + position.startX,
+                canvasBounds.top + position.startY,
+                position.endX - position.startX,
+                position.endY - position.startY
+              );
+            };
+            void workbook.endEditingAsync(false).then((ended) => {
+              if (!ended || !alive || !editableRef.current) {
+                return;
+              }
+              setCellEditing(true);
+              textEditor.open({
+                ariaLabel: t("Edit cell"),
+                getBounds,
+                value: typeof cell?.v === "string" ? cell.v : "",
+                onCommit: (value) => range.setValue(value),
+                onClose: () => {
+                  if (alive) {
+                    setCellEditing(false);
+                  }
+                },
+              });
+            });
           })
         );
         if (workspaceRef.current) {
@@ -749,7 +954,7 @@ export const TableDocument = observer(function TableDocument({
           updatePresence(collaboration.peers);
           syncUndo();
         } catch (error) {
-          session.reportError(error);
+          reportEditorError(error);
         } finally {
           applyingRemote = false;
         }
@@ -804,6 +1009,7 @@ export const TableDocument = observer(function TableDocument({
         if (!editableRef.current) {
           return;
         }
+        commitMobileTextEditor();
         const wasEditing = workbook.isCellEditing();
         if (wasEditing) {
           const committed = await workbook.endEditingAsync(true);
@@ -818,14 +1024,12 @@ export const TableDocument = observer(function TableDocument({
         }
       };
       const flush = async () => {
-        try {
-          await commit();
-          if (editableRef.current) {
-            await session.flush();
-          }
-        } catch (error) {
-          session.reportError(error);
+        await commit().catch((error: unknown) => {
+          reportEditorError(error);
           throw error;
+        });
+        if (editableRef.current) {
+          await session.flush();
         }
       };
       const guard = workbook.onBeforeCommandExecute((command, options) => {
@@ -861,7 +1065,7 @@ export const TableDocument = observer(function TableDocument({
               applyRemote();
             }
           } catch (error) {
-            session.reportError(error);
+            reportEditorError(error);
           }
         }, 0);
       });
@@ -880,7 +1084,7 @@ export const TableDocument = observer(function TableDocument({
             }
           },
           (error: unknown) => {
-            session.reportError(error);
+            reportEditorError(error);
           }
         );
       };
@@ -899,7 +1103,7 @@ export const TableDocument = observer(function TableDocument({
             <TableSheetControls
               host={host}
               beforeAction={commit}
-              onError={(error) => session.reportError(error)}
+              onError={reportEditorError}
             />
           ))
         );
@@ -931,7 +1135,7 @@ export const TableDocument = observer(function TableDocument({
         ) {
           return;
         }
-        void commit().catch((error: unknown) => session.reportError(error));
+        void commit().catch(reportEditorError);
         event.preventDefault();
         event.returnValue = "";
       };
@@ -947,7 +1151,6 @@ export const TableDocument = observer(function TableDocument({
       return () => {
         alive = false;
         permissionInitSubscription.unsubscribe();
-        session.dispose();
         clearTimeout(captureTimer);
         window.removeEventListener("beforeunload", handleBeforeUnload);
         window.removeEventListener("online", handleOnline);
@@ -962,12 +1165,11 @@ export const TableDocument = observer(function TableDocument({
           .finally(() => {
             subscription.dispose();
             guard.dispose();
-            session.dispose();
             dispose();
           });
       };
     } catch (error) {
-      session.reportError(error);
+      reportEditorError(error);
       dispose();
     }
     return undefined;
@@ -994,9 +1196,9 @@ export const TableDocument = observer(function TableDocument({
         "text/markdown"
       );
     } catch (error) {
-      session.reportError(error);
+      reportEditorError(error);
     }
-  }, [session, t]);
+  }, [reportEditorError, session, t]);
 
   const handleReload = useCallback(() => {
     dialogs.openModal({
@@ -1043,9 +1245,13 @@ export const TableDocument = observer(function TableDocument({
       session.discard();
       history.push(documentPath(copy));
     } catch (error) {
-      session.reportError(error);
+      reportEditorError(error);
     }
-  }, [document, history, session, t]);
+  }, [document, history, reportEditorError, session, t]);
+
+  const handleCloseSplitPane = useCallback(() => {
+    closeSplitPane(appHistory, pane);
+  }, [pane]);
 
   const state = !editable
     ? "readonly"
@@ -1078,6 +1284,7 @@ export const TableDocument = observer(function TableDocument({
       data-table-save-state={state}
     >
       {mobile && <MobileViewportStyles />}
+      {mobile && <MobileNativeEditorStyles />}
       <PageTitle title={session.title || t("Untitled")} />
       <Prompt when={editable} message={TABLE_SAVE_PROMPT} />
       <VisuallyHidden.Root role="status" aria-live="polite">
@@ -1096,6 +1303,7 @@ export const TableDocument = observer(function TableDocument({
           <TitleInput
             ref={titleRef}
             aria-label={t("Document title")}
+            maxLength={DocumentValidation.maxTitleLength}
             placeholder={t("Untitled")}
             title={session.title || t("Untitled")}
             value={session.title}
@@ -1143,9 +1351,32 @@ export const TableDocument = observer(function TableDocument({
               }
             />
           )}
+          {isSplitView && (
+            <Button
+              aria-label={t("Close pane")}
+              icon={<CloseIcon />}
+              neutral
+              borderOnHover
+              onClick={handleCloseSplitPane}
+            />
+          )}
         </DocumentActions>
       </Toolbar>
       <Notices document={document} readOnly={readOnly} />
+      {editorError && (
+        <Notice role="alert">
+          <span>
+            {t(
+              "The table editor could not complete that action. Your workbook remains open."
+            )}
+          </span>
+          <NoticeActions>
+            <Button neutral onClick={() => setEditorError(false)}>
+              {t("Dismiss")}
+            </Button>
+          </NoticeActions>
+        </Notice>
+      )}
       {session.error && (
         <Notice role="alert">
           <span>
@@ -1293,6 +1524,29 @@ const Workspace = styled.div`
     [data-table-sheet-pressed] {
       opacity: 0.65;
     }
+  }
+`;
+const MobileNativeEditorStyles = createGlobalStyle`
+  .outline-table-mobile-text-editor {
+    position: fixed;
+    z-index: 1200;
+    box-sizing: border-box;
+    max-width: calc(100vw - 8px);
+    max-height: min(40vh, 240px);
+    padding: 6px 8px;
+    resize: none;
+    overflow: auto;
+    border: 2px solid var(--univer-primary-color, #274ac7);
+    border-radius: 2px;
+    outline: none;
+    background: ${({ theme }) => theme.background};
+    color: ${({ theme }) => theme.text};
+    caret-color: ${({ theme }) => theme.text};
+    font: 16px/1.4 sans-serif;
+    white-space: pre-wrap;
+    touch-action: manipulation;
+    -webkit-user-select: text;
+    user-select: text;
   }
 `;
 const Toolbar = styled.div`

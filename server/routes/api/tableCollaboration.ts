@@ -1,6 +1,7 @@
 import Router from "koa-router";
 import { z } from "zod";
 import { TABLE_COLLABORATION_LIMIT } from "@shared/utils/tableCollaboration";
+import { DocumentValidation } from "@shared/validations";
 import { tableCollaborativeUpdater } from "@server/commands/tableCollaborativeUpdater";
 import auth from "@server/middlewares/authentication";
 import validate from "@server/middlewares/validate";
@@ -30,7 +31,7 @@ const update = BaseSchema.extend({
       .string()
       .min(1)
       .max(Math.ceil((TABLE_COLLABORATION_LIMIT * 4) / 3)),
-    title: z.string().max(1000).optional(),
+    title: z.string().max(DocumentValidation.maxTitleLength).optional(),
     exclusiveRevision: z.number().int().positive().optional(),
     baseRevision: z.number().int().positive(),
   }),

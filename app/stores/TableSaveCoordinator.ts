@@ -63,10 +63,16 @@ export class TableSaveCoordinator {
     documentId: string,
     send: (revision?: number) => Promise<T>
   ): Promise<T> {
-    await this.flush(documentId);
-    const entry = [...this.entries].find(
-      (item) => item.documentId === documentId && item.updateMetadata
+    const entries = [...this.entries].filter(
+      (entry) => entry.documentId === documentId
     );
+    let entry = entries.find((item) => item.updateMetadata);
+    for (const item of entries) {
+      if (item.hasPending() && item.updateMetadata) {
+        entry = item;
+      }
+      await item.flush();
+    }
     if (!entry?.updateMetadata) {
       return send();
     }

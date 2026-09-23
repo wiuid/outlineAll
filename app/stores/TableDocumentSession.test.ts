@@ -244,6 +244,7 @@ describe("TableDocumentSession", () => {
     expect(session.title).toBe("Still in memory");
     await session.flush();
     expect(session.dirty).toBe(false);
+    expect(session.storageFailed).toBe(false);
     expect(storage.getItem("other-tab")).toBe("keep this draft");
     session.dispose();
   });

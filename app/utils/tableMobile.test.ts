@@ -1,8 +1,24 @@
 import { DOCS_NORMAL_EDITOR_UNIT_ID_KEY } from "@univerjs/core";
 import { vi } from "vitest";
-import { bindTableMobileInput, observeTableViewport } from "./tableMobile";
+import {
+  bindTableMobileHeaderSelection,
+  bindTableMobileInput,
+  createTableMobileTextEditor,
+  observeTableViewport,
+} from "./tableMobile";
 
 const editorId = `__editor_${DOCS_NORMAL_EDITOR_UNIT_ID_KEY}`;
+
+function dispatchTouch(
+  target: EventTarget,
+  type: string,
+  touches: Array<{ clientX: number; clientY: number }>
+) {
+  const event = new Event(type, { bubbles: true, cancelable: true });
+  Object.defineProperty(event, "touches", { value: touches });
+  target.dispatchEvent(event);
+  return event;
+}
 
 describe("mobile table keyboard", () => {
   it("controls only the cell editor and waits for its asynchronous mount", async () => {
@@ -64,6 +80,134 @@ describe("mobile table keyboard", () => {
     replacement.replaceWith(next);
     await Promise.resolve();
     expect(next.hasAttribute("inputmode")).toBe(false);
+  });
+});
+
+describe("mobile table text editor", () => {
+  it("uses a selectable textarea and commits its final value", () => {
+    const host = document.createElement("div");
+    const onCommit = vi.fn();
+    const onClose = vi.fn();
+    document.body.append(host);
+    const editor = createTableMobileTextEditor(host);
+
+    editor.open({
+      ariaLabel: "Edit cell",
+      getBounds: () => new DOMRect(20, 30, 80, 24),
+      onCommit,
+      onClose,
+      value: "first\nsecond",
+    });
+    const textarea = document.querySelector<HTMLTextAreaElement>(
+      ".outline-table-mobile-text-editor"
+    );
+    expect(textarea).not.toBeNull();
+    expect(textarea?.value).toBe("first\nsecond");
+    expect(textarea?.getAttribute("aria-label")).toBe("Edit cell");
+    expect(textarea?.selectionStart).toBe(12);
+    expect(textarea?.style.width).toBe("120px");
+
+    if (textarea) {
+      textarea.value = "updated\nvalue";
+    }
+    editor.commit();
+    expect(onCommit).toHaveBeenCalledWith("updated\nvalue");
+    expect(onClose).toHaveBeenCalledTimes(1);
+    expect(document.querySelector(".outline-table-mobile-text-editor")).toBe(
+      null
+    );
+    editor.dispose();
+    host.remove();
+  });
+
+  it("cancels without writing and replaces an existing editor", () => {
+    const host = document.createElement("div");
+    document.body.append(host);
+    const editor = createTableMobileTextEditor(host);
+    const firstCommit = vi.fn();
+    const firstClose = vi.fn();
+    const secondCommit = vi.fn();
+
+    editor.open({
+      ariaLabel: "Edit cell",
+      getBounds: () => new DOMRect(0, 0, 160, 44),
+      onCommit: firstCommit,
+      onClose: firstClose,
+      value: "first",
+    });
+    editor.open({
+      ariaLabel: "Edit cell",
+      getBounds: () => new DOMRect(0, 0, 160, 44),
+      onCommit: secondCommit,
+      onClose: vi.fn(),
+      value: "second",
+    });
+    expect(firstCommit).not.toHaveBeenCalled();
+    expect(firstClose).toHaveBeenCalledTimes(1);
+
+    editor.cancel();
+    expect(secondCommit).not.toHaveBeenCalled();
+    editor.dispose();
+    host.remove();
+  });
+});
+
+describe("mobile table header selection", () => {
+  it("turns a row-header drag into one inclusive range", () => {
+    const canvas = document.createElement("canvas");
+    const select = vi.fn();
+    const dispose = bindTableMobileHeaderSelection(canvas, {
+      getTarget: (_x, y, axis) => ({
+        axis: axis ?? "row",
+        index: Math.floor(y / 20),
+      }),
+      select,
+    });
+
+    dispatchTouch(canvas, "touchstart", [{ clientX: 10, clientY: 45 }]);
+    const smallMove = dispatchTouch(canvas, "touchmove", [
+      { clientX: 10, clientY: 49 },
+    ]);
+    expect(smallMove.defaultPrevented).toBe(false);
+    expect(select).not.toHaveBeenCalled();
+
+    const drag = dispatchTouch(canvas, "touchmove", [
+      { clientX: 10, clientY: 125 },
+    ]);
+    expect(drag.defaultPrevented).toBe(true);
+    expect(select).toHaveBeenLastCalledWith("row", 2, 6);
+
+    const end = dispatchTouch(canvas, "touchend", []);
+    expect(end.defaultPrevented).toBe(true);
+    dispose();
+  });
+
+  it("keeps taps and body gestures native and supports reverse column drags", () => {
+    const canvas = document.createElement("canvas");
+    const select = vi.fn();
+    const dispose = bindTableMobileHeaderSelection(canvas, {
+      getTarget: (x, _y, axis) =>
+        axis || x < 40
+          ? { axis: axis ?? "column", index: Math.floor(x / 20) }
+          : undefined,
+      select,
+    });
+
+    dispatchTouch(canvas, "touchstart", [{ clientX: 80, clientY: 80 }]);
+    const bodyMove = dispatchTouch(canvas, "touchmove", [
+      { clientX: 20, clientY: 80 },
+    ]);
+    expect(bodyMove.defaultPrevented).toBe(false);
+
+    dispatchTouch(canvas, "touchstart", [{ clientX: 30, clientY: 5 }]);
+    const tapEnd = dispatchTouch(canvas, "touchend", []);
+    expect(tapEnd.defaultPrevented).toBe(false);
+    expect(select).not.toHaveBeenCalled();
+
+    dispatchTouch(canvas, "touchstart", [{ clientX: 30, clientY: 5 }]);
+    dispatchTouch(canvas, "touchmove", [{ clientX: 10, clientY: 5 }]);
+    expect(select).toHaveBeenLastCalledWith("column", 1, 0);
+    dispose();
   });
 });
 

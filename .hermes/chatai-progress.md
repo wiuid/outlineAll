@@ -598,3 +598,10 @@
 - `https://kb.webraa.com` 于 **2026-09-19 14:12:43 UTC** 完成切换。应用、脚本运行器和调度均 healthy，公网健康及实际 JS 与构建校验和通过；PostgreSQL、Redis 容器 ID 未变，执行器镜像、权限、挂载和隔离保持原配置。固定合成运行器检查通过认证、rootless gVisor、公网请求与私网阻断，没有执行用户脚本、写正式文档或发送机器人消息。
 - 候选镜像使用测试数据库通过私有 Unix socket 健康检查；生产构建不提供 Vite 源码模块，临时注入 `TableDocument.tsx` 调试对象的候选浏览器脚本因此不能运行，未将此工具限制当作产品失败。候选镜像绑定同一提交及已通过的真实测试站结果：连续多选行列、原生多行高度、撤销/重做、保存、刷新和双窗口协同，最终 pageerror/HTTP 错误为 0；上线后实际静态资源哈希与候选构建一致。
 - 发布证据在 `/tmp/codex-kb-release-c49844756/`：`browser-acceptance.json`、`runtime-acceptance.json`、`production-acceptance.json`、`deployed.json`、`backup.json` 和构建日志；工具为同目录 `release.py` / `operations.py`。临时预检容器已停止，最终正式镜像 revision 为 `c49844756` 且 healthy。没有新建 Markdown 文件、提交凭据或临时产物。
+
+## 2026-09-23 Codex (260920 稳定性优化验收)
+- 当前工作树保留 17 个未提交代码/测试文件；未推送 GitHub，也未修改 kb 正式环境。测试站 `doc.webraa.com` 使用独立后端 3005 和现有 Vite 前端。
+- 本轮补齐同一 WebSocket 的多表格窗格订阅和表格工具栏关闭窗格入口。浏览器发现 React 开发模式 effect 重放会提前销毁表格 session，导致移动端编辑后 `dirty=true` 但自动保存不启动；现由单一生命周期 effect 在真正卸载或替换 session 时释放，Socket 和 Univer effect 只清理各自资源。
+- 测试站验证：移动端原生 textarea 部分选择、换行保存与刷新持久化通过；整行/整列触摸拖选范围正确；同页双表格视图使用不同 client ID，关闭分屏后旧订阅清理且单窗格恢复在线名单。多人协同完整脚本通过 17 组检查，含公式、同格并发、离线合并、撤销、IME、工作表管理、深浅主题、移动端同步及 API 新 epoch，pageerror 和意外 HTTP 错误为 0。API read/旧 revision 409 再次核对通过。
+- 最终前端生产构建、TypeScript、完整 lint、17 个文件 oxfmt 与 `git diff --check` 通过；前端 53 tests、数据库/WebSocket 13 tests 通过。构建仅有既有大 chunk 提示。自动化移动端为 Chromium 模拟，不等同于小米 Chrome/Via 实机软键盘验收。
+- 后续交付动作：核对并提交当前 260920 修改，再决定是否推送和发布正式环境；本轮没有取得发布授权，也没有执行发布。

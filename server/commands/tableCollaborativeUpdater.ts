@@ -202,15 +202,23 @@ export async function tableCollaborativeUpdater(
           );
           transaction.afterCommit(async () => {
             await publishTableChange(document.id, document.revisionCount);
-            await Event.schedule({
-              name: "documents.update",
-              documentId: document.id,
-              collectionId: document.collectionId,
-              teamId: document.teamId,
-              actorId: user.id,
-              authType: AuthenticationType.APP,
-              data: { multiplayer: true, title: document.title },
-            });
+            try {
+              await Event.schedule({
+                name: "documents.update",
+                documentId: document.id,
+                collectionId: document.collectionId,
+                teamId: document.teamId,
+                actorId: user.id,
+                authType: AuthenticationType.APP,
+                data: { multiplayer: true, title: document.title },
+              });
+            } catch (error) {
+              Logger.error(
+                "Unable to schedule committed table update event",
+                toError(error),
+                { documentId: document.id }
+              );
+            }
           });
         }
       }

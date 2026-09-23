@@ -31,4 +31,32 @@ describe("TableSaveCoordinator", () => {
     await expect(coordinator.flush().then(action)).rejects.toThrow("Conflict");
     expect(action).not.toHaveBeenCalled();
   });
+
+  it("updates metadata through the instance that saved the latest edits", async () => {
+    const coordinator = new TableSaveCoordinator();
+    const firstUpdate = vi.fn();
+    const secondUpdate = vi.fn(async (send) => (await send(4)).value);
+    coordinator.register({
+      documentId: "shared",
+      hasPending: () => false,
+      flush: vi.fn().mockResolvedValue(undefined),
+      updateMetadata: firstUpdate,
+    });
+    coordinator.register({
+      documentId: "shared",
+      hasPending: () => true,
+      flush: vi.fn().mockResolvedValue(undefined),
+      updateMetadata: secondUpdate,
+    });
+    const send = vi.fn().mockResolvedValue({
+      data: { revision: 5, title: "Renamed" },
+    });
+
+    await expect(coordinator.updateMetadata("shared", send)).resolves.toEqual({
+      data: { revision: 5, title: "Renamed" },
+    });
+    expect(firstUpdate).not.toHaveBeenCalled();
+    expect(secondUpdate).toHaveBeenCalledTimes(1);
+    expect(send).toHaveBeenCalledWith(4);
+  });
 });

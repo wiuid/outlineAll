@@ -1,6 +1,7 @@
 import { LocaleType } from "@univerjs/core";
 import * as Y from "yjs";
 import { CollectionPermission } from "@shared/types";
+import { DocumentValidation } from "@shared/validations";
 import {
   captureTableChanges,
   decodeTableBytes,
@@ -14,7 +15,7 @@ import {
   UniverTableSchema,
   tableDocumentToMarkdown,
 } from "@shared/utils/tableDocument";
-import { Document } from "@server/models";
+import { Document, Event } from "@server/models";
 import { parser } from "@server/editor";
 import {
   createTableScript,
@@ -246,6 +247,43 @@ describe("table collaboration database integration", () => {
       body: { documentId: id, epoch: state.epoch, vector: "AAAA!!!!" },
     });
     expect(invalid.status).toBe(400);
+  });
+
+  it("rejects titles that exceed the document title limit", async () => {
+    const { user, id, state } = await fixture();
+    const invalid = await server.post("/api/tableCollaboration.update", user, {
+      body: {
+        documentId: id,
+        ...change(state, 0, 3),
+        title: "x".repeat(DocumentValidation.maxTitleLength + 1),
+      },
+    });
+
+    expect(invalid.status).toBe(400);
+    const current = await server.post("/api/documents.info", user, {
+      body: { id },
+    });
+    expect((await current.json()).data.revision).toBe(state.revision);
+  });
+
+  it("acknowledges a committed update when event scheduling fails", async () => {
+    const { user, id, state } = await fixture();
+    vi.spyOn(Event, "schedule").mockRejectedValueOnce(
+      new Error("Event queue unavailable")
+    );
+
+    const updated = await server.post("/api/tableCollaboration.update", user, {
+      body: { documentId: id, ...change(state, 0, 17) },
+    });
+
+    expect(updated.status).toBe(200);
+    expect((await updated.json()).data.revision).toBe(state.revision + 1);
+    const current = await server.post("/api/documents.info", user, {
+      body: { id },
+    });
+    expect(
+      (await current.json()).data.table.workbook.sheets.sheet.cellData[0][0].v
+    ).toBe(17);
   });
 
   it("provides the committed collaborative values and calculated formulas to Python execution", async () => {

@@ -1,6 +1,8 @@
 import { Op } from "sequelize";
 import { TableScriptLimits } from "@shared/types/tableScript";
+import { toError } from "@shared/utils/error";
 import { getTableDocument } from "@shared/utils/tableDocument";
+import Logger from "@server/logging/Logger";
 import { Document, TableScript, TableScriptRun, User } from "@server/models";
 import { DocumentHelper } from "@server/models/helpers/DocumentHelper";
 import { can } from "@server/policies";
@@ -167,7 +169,10 @@ export async function performTableScriptRun(
         where: { id: run.id, status: { [Op.in]: ["running", "stopping"] } },
       }
     );
-  } catch {
+  } catch (error) {
+    Logger.error("Table script execution failed", toError(error), {
+      runId: run.id,
+    });
     await TableScriptRun.update(
       {
         status: "failed",

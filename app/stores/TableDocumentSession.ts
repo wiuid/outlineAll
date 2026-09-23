@@ -154,15 +154,6 @@ export class TableDocumentSession {
   }
 
   /**
-   * Exposes a failed capture or save without losing the last valid local draft.
-   *
-   * @param error the failure to display in the editor.
-   */
-  @action reportError(error: unknown): void {
-    this.error = toError(error);
-  }
-
-  /**
    * Releases the local draft after the user explicitly chooses to discard it.
    */
   @action discard(): void {
@@ -318,6 +309,7 @@ export class TableDocumentSession {
       if (this.options.draftKey) {
         this.options.storage?.removeItem(this.options.draftKey);
       }
+      this.storageFailed = false;
     } catch {
       this.storageFailed = true;
     }

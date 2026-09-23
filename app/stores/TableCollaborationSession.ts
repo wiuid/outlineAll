@@ -167,7 +167,7 @@ export class TableCollaborationSession {
    * @returns completion of the current reconciliation.
    */
   async refresh(): Promise<void> {
-    if (this.conflict) {
+    if (this.disposed || this.conflict) {
       return;
     }
     if (!this.loaded) {
@@ -443,19 +443,6 @@ export class TableCollaborationSession {
     };
   }
 
-  /**
-   * Exposes a save failure while preserving the local workbook and shared draft.
-   *
-   * @param error the failure to display.
-   */
-  @action reportError(error: unknown): void {
-    this.error = toError(error);
-    if (error instanceof DocumentConflictError) {
-      this.conflict = true;
-    }
-    this.persistDraft();
-  }
-
   /** Removes a draft only after explicit discard or saving it as a separate table. */
   @action discard(): void {
     this.acknowledged = this.sequence;
@@ -467,6 +454,7 @@ export class TableCollaborationSession {
 
   /** Stops background scheduling; an inflight final save may still complete. */
   dispose(): void {
+    this.disposed = true;
     clearTimeout(this.timer);
     this.refreshPending = false;
   }
@@ -488,7 +476,17 @@ export class TableCollaborationSession {
   private inflight?: Promise<void>;
   private timer?: ReturnType<typeof setTimeout>;
   private refreshPending = false;
+  private disposed = false;
   private readonly listeners = new Set<() => void>();
+
+  @action
+  private reportError(error: unknown): void {
+    this.error = toError(error);
+    if (error instanceof DocumentConflictError) {
+      this.conflict = true;
+    }
+    this.persistDraft();
+  }
 
   private changeHistory(direction: "undo" | "redo"): void {
     const manager = this.undoManager;
@@ -543,8 +541,7 @@ export class TableCollaborationSession {
       const response = await this.request("info", {
         documentId: this.options.documentId,
       });
-      const stored = this.options.storage?.getItem(this.draftKey);
-      const draft = stored ? draftSchema.parse(JSON.parse(stored)) : undefined;
+      const draft = this.readDraft();
       if (
         draft &&
         (draft.epoch !== response.epoch ||
@@ -608,12 +605,14 @@ export class TableCollaborationSession {
         vector: encodeTableBytes(Y.encodeStateVector(this.doc)),
       });
       this.receive(response);
-      runInAction(() => {
-        this.error = undefined;
-      });
       this.schedule();
     } catch (error) {
-      this.reportError(error);
+      // Background reconciliation is not a save attempt. Only a revision
+      // conflict should stop local persistence; transient read failures must
+      // not create or clear the save-error state shown by the table editor.
+      if (error instanceof DocumentConflictError) {
+        this.reportError(error);
+      }
       throw error;
     }
   }
@@ -714,7 +713,7 @@ export class TableCollaborationSession {
 
   private schedule(): void {
     clearTimeout(this.timer);
-    if (!this.loaded || !this.dirty || this.conflict) {
+    if (this.disposed || !this.loaded || !this.dirty || this.conflict) {
       return;
     }
     this.timer = setTimeout(() => {
@@ -725,7 +724,7 @@ export class TableCollaborationSession {
   }
 
   private drainRefresh(): void {
-    if (!this.refreshPending || this.conflict) {
+    if (this.disposed || !this.refreshPending || this.conflict) {
       return;
     }
     this.refreshPending = false;
@@ -738,6 +737,34 @@ export class TableCollaborationSession {
 
   private get draftKey(): string {
     return `${this.options.draftKey}:collaboration`;
+  }
+
+  private readDraft(): ReturnType<typeof draftSchema.parse> | undefined {
+    if (!this.options.storage || !this.options.draftKey) {
+      return;
+    }
+    try {
+      const stored = this.options.storage.getItem(this.draftKey);
+      const draft = stored ? draftSchema.parse(JSON.parse(stored)) : undefined;
+      if (draft) {
+        const validation = new Y.Doc();
+        try {
+          Y.applyUpdate(validation, decodeTableBytes(draft.state));
+          materializeTable(validation);
+        } finally {
+          validation.destroy();
+        }
+      }
+      runInAction(() => {
+        this.storageFailed = false;
+      });
+      return draft;
+    } catch {
+      runInAction(() => {
+        this.storageFailed = true;
+      });
+      return;
+    }
   }
 
   private persistDraft(): void {
@@ -770,6 +797,9 @@ export class TableCollaborationSession {
   private removeDraft(): void {
     try {
       this.options.storage?.removeItem(this.draftKey);
+      runInAction(() => {
+        this.storageFailed = false;
+      });
     } catch {
       runInAction(() => {
         this.storageFailed = true;

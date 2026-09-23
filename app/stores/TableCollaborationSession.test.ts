@@ -35,7 +35,9 @@ function server() {
   let revision = 1;
   let title = "Session";
   let fail = false;
+  let loseUpdateResponse = false;
   let pause: Promise<void> | undefined;
+  let pauseRead: Promise<void> | undefined;
   const storage = new Map<string, string>();
   const request = vi.fn(
     async (
@@ -66,6 +68,12 @@ function server() {
         if (pause) {
           await pause;
         }
+        if (loseUpdateResponse) {
+          loseUpdateResponse = false;
+          throw new Error("Response lost after commit");
+        }
+      } else if (pauseRead) {
+        await pauseRead;
       }
       return {
         epoch,
@@ -114,8 +122,14 @@ function server() {
     offline: (value: boolean) => {
       fail = value;
     },
+    loseNextUpdateResponse: () => {
+      loseUpdateResponse = true;
+    },
     pause: (value?: Promise<void>) => {
       pause = value;
+    },
+    pauseRead: (value?: Promise<void>) => {
+      pauseRead = value;
     },
     replace: () => {
       epoch = uuid();
@@ -228,6 +242,110 @@ describe("table collaboration editing session", () => {
     );
     expect(backend.storage.size).toBe(0);
     restored.dispose();
+  });
+
+  it("loads the server workbook when the local recovery draft is malformed", async () => {
+    const backend = server();
+    backend.storage.set(
+      "draft:collaboration",
+      JSON.stringify({
+        epoch: uuid(),
+        state: "not-a-yjs-update",
+        baseRevision: 1,
+        title: "Damaged draft",
+        savedTitle: "Session",
+      })
+    );
+
+    const session = await backend.make();
+
+    expect(session.loaded).toBe(true);
+    expect(session.storageFailed).toBe(true);
+    expect(session.error).toBeUndefined();
+    expect(session.snapshot().sheets.sheet.cellData?.[0]?.[0]?.v).toBe(
+      "initial"
+    );
+    session.dispose();
+  });
+
+  it("keeps background synchronization separate from save failures", async () => {
+    const backend = server();
+    const session = await backend.make();
+
+    backend.offline(true);
+    await expect(session.refresh()).rejects.toThrow("Offline");
+    expect(session.error).toBeUndefined();
+
+    edit(session, 1, "unsaved");
+    await expect(session.flush()).rejects.toThrow("Offline");
+    const saveError = session.error;
+    expect(saveError?.message).toBe("Offline");
+
+    backend.offline(false);
+    await session.refresh();
+    expect(session.error).toBe(saveError);
+
+    await session.flush();
+    expect(session.error).toBeUndefined();
+    expect(session.hasPending).toBe(false);
+    session.dispose();
+  });
+
+  it("stops background saves after disposal while allowing a final flush", async () => {
+    const backend = server();
+    const session = await backend.make();
+    let release = () => {};
+    backend.pauseRead(
+      new Promise<void>((resolve) => {
+        release = resolve;
+      })
+    );
+    backend.request.mockClear();
+    vi.useFakeTimers();
+    try {
+      edit(session, 1, "local draft");
+      const refreshing = session.refresh();
+      session.dispose();
+      release();
+      await refreshing;
+      await vi.advanceTimersByTimeAsync(300);
+      expect(
+        backend.request.mock.calls.filter(([method]) => method === "update")
+      ).toHaveLength(0);
+      expect(session.hasPending).toBe(true);
+      await session.flush();
+      expect(
+        backend.request.mock.calls.filter(([method]) => method === "update")
+      ).toHaveLength(1);
+      expect(session.hasPending).toBe(false);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("acknowledges a committed update after its response is lost without saving it twice", async () => {
+    const backend = server();
+    const session = await backend.make();
+    edit(session, 1, "committed once");
+    backend.loseNextUpdateResponse();
+
+    await expect(session.flush()).rejects.toThrow("Response lost after commit");
+    expect(backend.snapshot().sheets.sheet.cellData?.[1]?.[0]?.v).toBe(
+      "committed once"
+    );
+    expect(session.hasPending).toBe(true);
+
+    await session.refresh();
+    await session.flush();
+
+    const updates = backend.request.mock.calls.filter(
+      ([method]) => method === "update"
+    );
+    expect(updates).toHaveLength(2);
+    expect(session.baseRevision).toBe(2);
+    expect(session.error).toBeUndefined();
+    expect(session.hasPending).toBe(false);
+    session.dispose();
   });
 
   it("loads API replacements automatically when there are no local edits", async () => {

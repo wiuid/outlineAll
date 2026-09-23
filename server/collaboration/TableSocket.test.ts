@@ -1,6 +1,7 @@
 import { createServer } from "node:http";
 import { Server } from "socket.io";
 import { io as connect, type Socket } from "socket.io-client";
+import { v4 as uuid } from "uuid";
 import { CollectionPermission } from "@shared/types";
 import {
   TableRosterSchema,
@@ -46,10 +47,11 @@ async function endpoint(user: User) {
   };
 }
 
-function watch(client: Socket, documentId: string): Promise<void> {
+function watch(client: Socket, documentId: string): Promise<string> {
+  const clientId = uuid();
   return new Promise((resolve) => {
-    client.once("table.changed", () => resolve());
-    client.emit("table.watch", { documentId });
+    client.once("table.changed", () => resolve(clientId));
+    client.emit("table.watch", { documentId, clientId });
   });
 }
 
@@ -75,7 +77,7 @@ describe("table websocket presence", () => {
     const another = await endpoint(second);
     try {
       await watch(a.client, document.id);
-      await watch(b.client, document.id);
+      const bClientId = await watch(b.client, document.id);
       await watch(another.client, document.id);
       await vi.waitFor(() =>
         expect(a.peers.at(-1)?.map((peer) => peer.userId)).toEqual(
@@ -96,6 +98,7 @@ describe("table websocket presence", () => {
       });
       b.client.emit("table.presence", {
         documentId: document.id,
+        clientId: bClientId,
         userId: first.id,
         name: "Impersonated",
         avatarUrl: "https://example.com/impersonated.png",
@@ -154,9 +157,10 @@ describe("table websocket presence", () => {
     });
     const view = await endpoint(reader);
     try {
-      await watch(view.client, document.id);
+      const clientId = await watch(view.client, document.id);
       view.client.emit("table.presence", {
         documentId: document.id,
+        clientId,
         selection: {
           epoch: document.id,
           sheetId: "sheet",
@@ -176,6 +180,46 @@ describe("table websocket presence", () => {
           sheetId: "sheet",
         });
       });
+    } finally {
+      await view.close();
+    }
+  }, 15000);
+
+  it("keeps multiple table views on one websocket independently subscribed", async () => {
+    const user = await buildUser();
+    const collection = await buildCollection({
+      teamId: user.teamId,
+      permission: CollectionPermission.ReadWrite,
+    });
+    const document = await buildDocument({
+      teamId: user.teamId,
+      userId: user.id,
+      collectionId: collection.id,
+    });
+    const view = await endpoint(user);
+    try {
+      const first = await watch(view.client, document.id);
+      const second = await watch(view.client, document.id);
+      await vi.waitFor(() =>
+        expect(view.peers.at(-1)?.map((peer) => peer.clientId)).toEqual(
+          expect.arrayContaining([first, second])
+        )
+      );
+
+      view.client.emit("table.unwatch", {
+        documentId: document.id,
+        clientId: first,
+      });
+      await vi.waitFor(() => {
+        const peers = view.peers.at(-1) ?? [];
+        expect(peers.some((peer) => peer.clientId === first)).toBe(false);
+        expect(peers.some((peer) => peer.clientId === second)).toBe(true);
+      });
+
+      const changed = vi.fn();
+      view.client.on("table.changed", changed);
+      await publishTableChange(document.id, 2);
+      await vi.waitFor(() => expect(changed).toHaveBeenCalledTimes(1));
     } finally {
       await view.close();
     }

@@ -4,6 +4,7 @@ import {
   performTableScriptRun,
   scheduleDueTableScripts,
 } from "@server/commands/tableScriptExecutor";
+import { toError } from "@shared/utils/error";
 import Logger from "@server/logging/Logger";
 import { getTableScriptExecutionConfig } from "@server/utils/tableScriptConfig";
 
@@ -31,16 +32,18 @@ export function initTableScripts(): void {
       await scheduleDueTableScripts();
       const run = await claimTableScriptRun();
       if (run) {
-        void performTableScriptRun(run).catch(() => {
+        void performTableScriptRun(run).catch((error: unknown) => {
           Logger.error(
             "Unable to persist script execution result",
-            new Error("Script result persistence failed"),
+            toError(error),
             { runId: run.id }
           );
         });
       }
-    } catch {
-      Logger.warn("Script dispatcher could not check pending work");
+    } catch (error) {
+      Logger.warn("Script dispatcher could not check pending work", {
+        error: toError(error).message,
+      });
     } finally {
       polling = false;
     }

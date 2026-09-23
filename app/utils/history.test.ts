@@ -1,4 +1,5 @@
 import type { Location } from "history";
+import { TABLE_SAVE_PROMPT, tableSaves } from "~/stores/TableSaveCoordinator";
 import history, { patchLocation, toLocationDescriptor } from "./history";
 import {
   getSplitPath,
@@ -57,6 +58,53 @@ describe("toLocationDescriptor", () => {
   it("returns location descriptor objects unchanged", () => {
     const descriptor = { pathname: "/doc/my-doc" };
     expect(toLocationDescriptor(descriptor)).toBe(descriptor);
+  });
+});
+
+describe("table save navigation", () => {
+  let unblock = () => {};
+  const navigate = (path: string) => {
+    withoutSplitViewNavigation(() => history.replace(path));
+  };
+
+  beforeEach(() => {
+    navigate("/home");
+  });
+
+  afterEach(() => {
+    unblock();
+    unblock = () => {};
+    vi.restoreAllMocks();
+  });
+
+  it("waits for table saves before navigating", async () => {
+    let finish = () => {};
+    const pending = new Promise<void>((resolve) => {
+      finish = resolve;
+    });
+    vi.spyOn(tableSaves, "flush").mockReturnValue(pending);
+    unblock = history.block(() => TABLE_SAVE_PROMPT);
+
+    history.push("/doc/saved-table");
+    expect(history.location.pathname).toBe("/home");
+    finish();
+    await pending;
+    await vi.waitFor(() => {
+      expect(history.location.pathname).toBe("/doc/saved-table");
+    });
+  });
+
+  it("stays on the current page when a table save fails", async () => {
+    const flush = vi
+      .spyOn(tableSaves, "flush")
+      .mockRejectedValue(new Error("Save failed"));
+    unblock = history.block(() => TABLE_SAVE_PROMPT);
+
+    history.push("/doc/unsaved-table");
+    await vi.waitFor(() => {
+      expect(flush).toHaveBeenCalledTimes(1);
+    });
+    expect(history.location.pathname).toBe("/home");
   });
 });
 
