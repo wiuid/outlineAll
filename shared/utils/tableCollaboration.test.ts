@@ -1,6 +1,7 @@
 import { LocaleType } from "@univerjs/core";
 import type { IWorkbookData } from "@univerjs/core";
 import * as Y from "yjs";
+import { getTableCellImage, setTableCellImage } from "./tableCellImage";
 import {
   captureTableChanges,
   createTableCollaboration,
@@ -60,6 +61,46 @@ function merge(first: Y.Doc, second: Y.Doc) {
 }
 
 describe("open-source table collaboration", () => {
+  it("keeps a concurrent image upload on its original cell after a row insertion", () => {
+    const { first, second } = peers();
+    const before = materializeTable(first);
+    const layout = getTableLayout(first);
+    const afterLayout = structuredClone(layout);
+    trackTableStructure(afterLayout, "sheet.mutation.insert-row", {
+      subUnitId: "sheet",
+      range: { startRow: 1, endRow: 1, startColumn: 0, endColumn: 3 },
+    });
+    const after = structuredClone(before);
+    after.sheets.sheet.rowCount = 13;
+    after.sheets.sheet.cellData = {
+      0: { 0: { v: 2 }, 1: { f: "=SUM(A1:A11)" } },
+      10: { 0: { v: "original" } },
+    };
+    captureTableChanges(first, before, after, layout, afterLayout, {});
+    const image = {
+      attachmentId: "f4a4e331-c5a5-4e78-a365-24975280b4a1",
+      src: "/api/attachments.redirect?id=f4a4e331-c5a5-4e78-a365-24975280b4a1",
+      name: "screenshot.png",
+      width: 640,
+      height: 480,
+    };
+    edit(second, (book) => {
+      book.sheets.sheet.cellData = {
+        ...book.sheets.sheet.cellData,
+        9: {
+          0: setTableCellImage(book.sheets.sheet.cellData?.[9]?.[0], image),
+        },
+      };
+    });
+    merge(first, second);
+    expect(
+      getTableCellImage(
+        materializeTable(first).sheets.sheet.cellData?.[10]?.[0]
+      )
+    ).toEqual(image);
+    expect(materializeTable(first).sheets.sheet.cellData?.[9]).toBeUndefined();
+    validateTableCollaboration(first);
+  });
   it("merges independent cells and retains native extension data", () => {
     const { first, second } = peers();
     edit(first, (book) => {

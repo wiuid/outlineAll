@@ -12,6 +12,70 @@ interface AutoFitSelection {
   ranges: readonly IRange[];
 }
 
+interface AutoHeightCommands extends Pick<
+  ICommandService,
+  "onCommandExecuted"
+> {
+  syncExecuteCommand: (
+    id: string,
+    params: { unitId: string; id: string },
+    options: { onlyLocal: boolean }
+  ) => void;
+}
+
+/** A workbook's deferred row measurements, canceled before its view is replaced. */
+export interface TableAutoHeightLifecycle extends IDisposable {
+  cancel: () => void;
+}
+
+/**
+ * Cancels native deferred measurements before their worksheet skeleton is disposed.
+ * Univer 0.25.1 retains queued auto-height tasks after a render unit is removed.
+ *
+ * @param commands the native command service.
+ * @param unitId the workbook whose deferred measurements should be tracked.
+ * @returns task cancellation and listener cleanup for the workbook lifecycle.
+ */
+export function bindTableAutoHeightLifecycle(
+  commands: AutoHeightCommands,
+  unitId: string
+): TableAutoHeightLifecycle {
+  const tasks = new Set<string>();
+  const mark = "sheet.operation.mark-dirty-row-auto-height";
+  const cancelId = "sheet.operation.cancel-mark-dirty-row-auto-height";
+  const subscription = commands.onCommandExecuted((command) => {
+    if (command.id !== mark && command.id !== cancelId) {
+      return;
+    }
+    const parsed = autoHeightTaskSchema.safeParse(command.params);
+    if (!parsed.success || parsed.data.unitId !== unitId) {
+      return;
+    }
+    if (command.id === mark) {
+      tasks.add(parsed.data.id);
+    } else {
+      tasks.delete(parsed.data.id);
+    }
+  });
+  const cancel = () => {
+    for (const id of tasks) {
+      commands.syncExecuteCommand(
+        cancelId,
+        { unitId, id },
+        { onlyLocal: true }
+      );
+    }
+    tasks.clear();
+  };
+  return {
+    cancel,
+    dispose: () => {
+      cancel();
+      subscription.dispose();
+    },
+  };
+}
+
 /**
  * Expands a header auto-fit to all selected rows or columns containing its anchor.
  *
@@ -122,3 +186,4 @@ const rangesSchema = z.array(
     endColumn: z.number().int().nonnegative(),
   })
 );
+const autoHeightTaskSchema = z.object({ unitId: z.string(), id: z.string() });

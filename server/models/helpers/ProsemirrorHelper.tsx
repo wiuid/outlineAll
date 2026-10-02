@@ -42,6 +42,11 @@ import {
 import parseDocumentSlug from "@shared/utils/parseDocumentSlug";
 import { isRTL } from "@shared/utils/rtl";
 import { UrlHelper } from "@shared/utils/UrlHelper";
+import { getTableCellImages } from "@shared/utils/tableCellImage";
+import {
+  getTableDocument,
+  tableDocumentToMarkdown,
+} from "@shared/utils/tableDocument";
 import { isInternalUrl } from "@shared/utils/urls";
 import attachmentCreator from "@server/commands/attachmentCreator";
 import { plugins, schema, parser } from "@server/editor";
@@ -580,6 +585,24 @@ export class ProsemirrorHelper extends SharedProsemirrorHelper {
       return node;
     }
 
+    const table = getTableDocument(json);
+    if (table?.version === 2) {
+      for (const { sheetId, row, column, image } of getTableCellImages(
+        table.workbook
+      )) {
+        const src = mapping.get(
+          `/api/attachments.redirect?id=${image.attachmentId}`
+        );
+        const cell = table.workbook.sheets[sheetId].cellData?.[row]?.[column];
+        if (cell && src) {
+          cell.custom = {
+            ...cell.custom,
+            outlineImage: { ...image, src },
+          };
+        }
+      }
+      return parser.parse(tableDocumentToMarkdown(table)).toJSON();
+    }
     return replaceAttachmentUrls(json);
   }
 
@@ -591,6 +614,17 @@ export class ProsemirrorHelper extends SharedProsemirrorHelper {
    */
   static parseAttachmentIds(doc: Node) {
     const urls: string[] = [];
+
+    const table = getTableDocument(doc.toJSON());
+    if (table?.version === 2) {
+      return [
+        ...new Set(
+          getTableCellImages(table.workbook).map(
+            ({ image }) => image.attachmentId
+          )
+        ),
+      ];
+    }
 
     doc.descendants((node) => {
       for (const mark of node.marks) {

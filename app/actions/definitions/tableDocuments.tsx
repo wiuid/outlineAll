@@ -1,4 +1,4 @@
-import { CloudIcon } from "outline-icons";
+import { CloudIcon, ImportIcon } from "outline-icons";
 import {
   ActionSeparator,
   createAction,
@@ -24,6 +24,7 @@ import {
   openDocumentComments,
   openDocumentInDesktop,
   openDocumentInsights,
+  openDocumentHistory,
   openDocumentInSplit,
   permanentlyDeleteDocument,
   publishDocument,
@@ -45,6 +46,9 @@ interface Options {
   saveDisabled: boolean;
   onSave: () => Promise<void>;
   onRename?: () => void;
+  onExportCSV?: () => Promise<void>;
+  onImportCSV?: () => void;
+  onPaste?: () => void;
 }
 
 /**
@@ -60,6 +64,9 @@ export function createTableDocumentMenuAction({
   saveDisabled,
   onSave,
   onRename,
+  onExportCSV,
+  onImportCSV,
+  onPaste,
 }: Options): ActionWithChildren {
   return createRootMenuAction([
     createAction({
@@ -72,6 +79,31 @@ export function createTableDocumentMenuAction({
       perform: onSave,
     }),
     editDocument,
+    openDocumentHistory,
+    createAction({
+      name: ({ t }) => t("Paste data"),
+      section: ActiveDocumentSection,
+      icon: <ImportIcon />,
+      visible: editable && !!onPaste,
+      disabled: saveDisabled,
+      perform: () => onPaste?.(),
+    }),
+    createAction({
+      name: ({ t }) => t("Import CSV"),
+      section: ActiveDocumentSection,
+      icon: <ImportIcon />,
+      visible: editable && !!onImportCSV,
+      disabled: saveDisabled,
+      perform: () => onImportCSV?.(),
+    }),
+    createAction({
+      name: ({ t }) => t("Export current sheet as CSV"),
+      section: ActiveDocumentSection,
+      visible: ({ stores }) =>
+        !!onExportCSV && !!stores.policies.abilities(documentId).download,
+      disabled: saveDisabled,
+      perform: () => onExportCSV?.(),
+    }),
     ActionSeparator,
     createDocumentMenu("document"),
     createDocumentMenu("table"),

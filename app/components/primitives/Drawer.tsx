@@ -25,7 +25,7 @@ const DrawerContent = React.forwardRef<
   React.ElementRef<typeof DrawerPrimitive.Content>,
   React.ComponentPropsWithoutRef<typeof DrawerPrimitive.Content>
 >((props, ref) => {
-  const { children, ...rest } = props;
+  const { children, "aria-label": ariaLabel, ...rest } = props;
   const [measureRef, bounds] = useMeasure();
 
   return (
@@ -33,7 +33,7 @@ const DrawerContent = React.forwardRef<
       <DrawerPrimitive.Overlay asChild>
         <Overlay />
       </DrawerPrimitive.Overlay>
-      <DrawerPrimitive.Content ref={ref} asChild>
+      <DrawerPrimitive.Content ref={ref} aria-label={ariaLabel} asChild>
         <StyledContent
           animate={
             bounds.height

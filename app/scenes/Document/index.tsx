@@ -20,6 +20,7 @@ type Params = {
 type LocationState = {
   title?: string;
   restore?: boolean;
+  tableRestore?: boolean;
   revisionId?: string;
   sidebarContext?: SidebarContextType;
 };

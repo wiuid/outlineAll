@@ -13,6 +13,9 @@ interface Props {
   status: string;
   onSave: () => Promise<void>;
   onRename?: () => void;
+  onExportCSV?: () => Promise<void>;
+  onImportCSV?: () => void;
+  onPaste?: () => void;
 }
 
 /**
@@ -28,6 +31,9 @@ export const TableDocumentMenu = observer(function TableDocumentMenu({
   status,
   onSave,
   onRename,
+  onExportCSV,
+  onImportCSV,
+  onPaste,
 }: Props) {
   const { t } = useTranslation();
   const action = useCallback(
@@ -38,8 +44,20 @@ export const TableDocumentMenu = observer(function TableDocumentMenu({
         saveDisabled,
         onSave,
         onRename,
+        onExportCSV,
+        onImportCSV,
+        onPaste,
       }),
-    [document.id, editable, saveDisabled, onSave, onRename]
+    [
+      document.id,
+      editable,
+      saveDisabled,
+      onSave,
+      onRename,
+      onExportCSV,
+      onImportCSV,
+      onPaste,
+    ]
   );
 
   return (

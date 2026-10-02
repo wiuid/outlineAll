@@ -7414,6 +7414,15 @@ __metadata:
   languageName: node
   linkType: hard
 
+"@types/papaparse@npm:^5":
+  version: 5.5.2
+  resolution: "@types/papaparse@npm:5.5.2"
+  dependencies:
+    "@types/node": "npm:*"
+  checksum: 10c0/27b097b6f8f204b20ade1f2cbf4798eb38caa5fbfa3180fd0faa5e3f9aea371c1786ae180d56f3287556463eefe3100c953e316ea6ee99d7ae1d04111cfc9e50
+  languageName: node
+  linkType: hard
+
 "@types/passport-oauth2@npm:^1.8.0":
   version: 1.8.0
   resolution: "@types/passport-oauth2@npm:1.8.0"
@@ -17747,6 +17756,7 @@ __metadata:
     "@types/node-fetch": "npm:^2.6.13"
     "@types/nodemailer": "npm:^6.4.23"
     "@types/pako": "npm:^2.0.4"
+    "@types/papaparse": "npm:^5"
     "@types/passport-oauth2": "npm:^1.8.0"
     "@types/pluralize": "npm:^0.0.33"
     "@types/png-chunks-extract": "npm:^1.0.2"
@@ -17871,6 +17881,7 @@ __metadata:
     oxlint-tsgolint: "npm:7.0.2001"
     oy-vey: "npm:^0.12.1"
     pako: "npm:^2.1.0"
+    papaparse: "npm:^5.7.0"
     passport: "npm:^0.7.0"
     passport-google-oauth2: "npm:^0.2.0"
     passport-oauth2: "npm:^1.8.0"
@@ -18346,6 +18357,13 @@ __metadata:
   version: 1.0.11
   resolution: "pako@npm:1.0.11"
   checksum: 10c0/86dd99d8b34c3930345b8bbeb5e1cd8a05f608eeb40967b293f72fe469d0e9c88b783a8777e4cc7dc7c91ce54c5e93d88ff4b4f060e6ff18408fd21030d9ffbe
+  languageName: node
+  linkType: hard
+
+"papaparse@npm:^5.7.0":
+  version: 5.7.0
+  resolution: "papaparse@npm:5.7.0"
+  checksum: 10c0/aeea2122ffa7abf33206ab9465e1adcb678ca0e9b08fbd3cea53bf6dc07d5903e69f387dc4dde2498e2478130ba3db79d1fd3956bf638c00be802f0d275e006d
   languageName: node
   linkType: hard
 

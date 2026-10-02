@@ -1,10 +1,10 @@
-import * as VisuallyHidden from "@radix-ui/react-visually-hidden";
 import {
   CommandType,
   DisposableCollection,
   DOCS_FORMULA_BAR_EDITOR_UNIT_ID_KEY,
   DOCS_NORMAL_EDITOR_UNIT_ID_KEY,
   LocaleType,
+  mergeWorksheetSnapshotWithDefault,
   RANGE_TYPE,
   ICommandService,
   IUndoRedoService,
@@ -13,6 +13,8 @@ import {
   type IDisposable,
 } from "@univerjs/core";
 import { Vector2 } from "@univerjs/engine-render";
+import { faEraser } from "@fortawesome/free-solid-svg-icons/faEraser";
+import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
 import {
   BuiltInUIPart,
   DocSelectionManagerService,
@@ -20,12 +22,17 @@ import {
   IEditorBridgeService,
   IEditorService,
   IMenuManagerService,
+  IRibbonService,
   IRenderManagerService,
+  INTERCEPTOR_POINT,
   Ribbon,
+  RibbonPosition,
   ScrollToCellOperation,
   SheetCellEditorResizeService,
   SheetInterceptorService,
   SheetSkeletonManagerService,
+  SetFrozenCommand,
+  CancelFrozenCommand,
   SheetsSelectionsService,
   WorkbookPermissionService,
 } from "@univerjs/preset-sheets-core";
@@ -34,7 +41,17 @@ import zhCN from "@univerjs/preset-sheets-core/locales/zh-CN";
 import { createUniver } from "@univerjs/presets";
 import "@univerjs/preset-sheets-core/lib/index.css";
 import { observer } from "mobx-react";
-import { CloseIcon, MenuIcon } from "outline-icons";
+import equal from "fast-deep-equal";
+import copy from "copy-to-clipboard";
+import {
+  CloseIcon,
+  CheckmarkIcon,
+  CopyIcon,
+  EditIcon,
+  ImportIcon,
+  TableIcon,
+  MenuIcon,
+} from "outline-icons";
 import { v4 as uuid } from "uuid";
 import {
   lazy,
@@ -45,12 +62,27 @@ import {
   useRef,
   useState,
 } from "react";
-import type { ReactNode } from "react";
+import type { FormEvent, MouseEvent, PointerEvent, ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { useTranslation } from "react-i18next";
 import { Prompt, useHistory } from "react-router-dom";
-import styled, { createGlobalStyle, useTheme } from "styled-components";
+import styled, { createGlobalStyle, css, useTheme } from "styled-components";
 import { DocumentValidation } from "@shared/validations";
+import { worksheetToCSV } from "@shared/utils/tableCSV";
+import {
+  createCSVWorksheet,
+  type TableCSVImport,
+} from "~/utils/tableCSVImport";
+import {
+  buildTablePasteValues,
+  type TablePasteTarget,
+} from "~/utils/tablePaste";
+import { toast } from "sonner";
+import {
+  clearTableSelectionValues,
+  selectionToTSV,
+  type TableSelectionClear,
+} from "~/utils/tableSelection";
 import { isTouchDevice } from "@shared/utils/browser";
 import {
   TableRosterSchema,
@@ -60,8 +92,16 @@ import {
   type TableDocumentContent,
   tableDocumentToMarkdown,
 } from "@shared/utils/tableDocument";
+import {
+  getTableCellImage,
+  getTableCellImageSize,
+  setTableCellImage,
+  setTableCellImageSize,
+} from "@shared/utils/tableCellImage";
 import Button from "~/components/Button";
 import ConfirmationDialog from "~/components/ConfirmationDialog";
+import Modal from "~/components/Modal";
+import Input from "~/components/Input";
 import PageTitle from "~/components/PageTitle";
 import { useSplitView } from "~/components/SplitView/context";
 import useStores from "~/hooks/useStores";
@@ -82,7 +122,10 @@ import appHistory from "~/utils/history";
 import { documentPath } from "~/utils/routeHelpers";
 import { closeSplitPane } from "~/utils/splitView";
 import { bindTableFormulaFocus } from "~/utils/tableFormulaFocus";
-import { bindTableAutoFit } from "~/utils/tableAutoFit";
+import {
+  bindTableAutoFit,
+  bindTableAutoHeightLifecycle,
+} from "~/utils/tableAutoFit";
 import { registerTableMultilineEditing } from "~/utils/tableMultiline";
 import {
   bindTableMobileHeaderSelection,
@@ -96,10 +139,27 @@ import {
 } from "~/utils/tablePreset";
 import { getTableWorkbook } from "~/utils/tableWorkbook";
 import { registerTableScriptMenu } from "~/utils/tableScriptMenu";
+import {
+  registerTableCellImages,
+  type TableCellImageController,
+} from "~/utils/tableCellImage";
 import { useTableSaveShortcut } from "../hooks/useTableSaveShortcut";
 import Notices from "./Notices";
 import { TableSheetControls } from "./TableSheetControls";
 import { TableCollaborators } from "./TableCollaborators";
+import { TableCellImageControl } from "./TableCellImageControl";
+
+const TableCSVImportDialog = lazy(() =>
+  import("./TableCSVImportDialog").then((module) => ({
+    default: module.TableCSVImportDialog,
+  }))
+);
+
+const TablePasteDialog = lazy(() =>
+  import("./TablePasteDialog").then((module) => ({
+    default: module.TablePasteDialog,
+  }))
+);
 
 const ScriptPanel = lazy(() =>
   import("./TableScriptPanel").then((module) => ({
@@ -117,13 +177,27 @@ interface Props {
 }
 
 interface TableRuntime {
+  prepareFreeze: () => {
+    destination: string;
+    frozenRows: number;
+    frozenColumns: number;
+    apply: (mode: TableFreezeMode) => Promise<void>;
+  };
+  getSelectionText: () => string;
+  prepareClearSelection: () => TableSelectionClear;
+  getPasteTarget: () => TablePasteTarget | undefined;
+  importCSV: (data: TableCSVImport, name: string) => Promise<void>;
+  exportCSV: () => Promise<{ name: string; text: string }>;
   commit: () => Promise<void>;
   flush: () => Promise<void>;
   setEditable: (editable: boolean) => void;
   setDarkMode: (dark: boolean) => void;
   setScriptsAvailable?: (available: boolean) => void;
   updatePresence?: (peers: TablePresence[]) => void;
+  images: TableCellImageController;
 }
+
+type TableFreezeMode = "firstRow" | "firstColumn" | "selection" | "none";
 
 /**
  * Renders a native Univer workbook with guarded autosave and recoverable drafts.
@@ -157,12 +231,32 @@ export const TableDocument = observer(function TableDocument({
   const workspaceRef = useRef<HTMLDivElement>(null);
   const titleRef = useRef<HTMLInputElement>(null);
   const runtimeRef = useRef<TableRuntime>();
+  const mobileEditingRef = useRef<{
+    start: () => void;
+    cancel: () => Promise<void>;
+  }>();
+  const getImageController = useCallback(() => runtimeRef.current?.images, []);
   const sessionUseCountsRef = useRef(
     new Map<TableDocumentSession | TableCollaborationSession, number>()
   );
   const [collaborationClientId] = useState(() => uuid());
   const [ready, setReady] = useState(false);
+  const [importCSVOpen, setImportCSVOpen] = useState(false);
+  const [pasteRequest, setPasteRequest] = useState<{
+    target: TablePasteTarget;
+    initialText?: string;
+  }>();
   const [cellEditing, setCellEditing] = useState(false);
+  const [homeToolsVisible, setHomeToolsVisible] = useState(true);
+  const [selectionLabel, setSelectionLabel] = useState("");
+  const [freezeTarget, setFreezeTarget] =
+    useState<ReturnType<TableRuntime["prepareFreeze"]>>();
+  const [freezeBusy, setFreezeBusy] = useState(false);
+  const freezeRunning = useRef(false);
+  const [renameRequest, setRenameRequest] = useState<{
+    originalTitle: string;
+    value: string;
+  }>();
   const [editorError, setEditorError] = useState(false);
   const reportEditorError = useCallback((_error: unknown) => {
     setEditorError(true);
@@ -331,6 +425,43 @@ export const TableDocument = observer(function TableDocument({
 
   useTableSaveShortcut(handleSave);
 
+  const handleImportCSV = useCallback(
+    async (data: TableCSVImport, name: string) => {
+      const runtime = runtimeRef.current;
+      if (!runtime) {
+        throw new Error(t("This table is no longer available."));
+      }
+      await runtime.importCSV(data, name);
+    },
+    [t]
+  );
+
+  const handleExportCSV = useCallback(async () => {
+    if (!abilities.download || !ready) {
+      return;
+    }
+    try {
+      const result = await runtimeRef.current?.exportCSV();
+      if (!result) {
+        return;
+      }
+      const url = URL.createObjectURL(
+        new Blob([result.text], { type: "text/csv;charset=utf-8" })
+      );
+      const link = window.document.createElement("a");
+      link.href = url;
+      link.download =
+        `${document.title}-${result.name}`.replace(/[\\/:*?"<>|]/g, "_") +
+        ".csv";
+      window.document.body.appendChild(link);
+      link.click();
+      link.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 1000);
+    } catch {
+      toast.error(t("Unable to export this worksheet as CSV."));
+    }
+  }, [abilities.download, ready, document.title, t]);
+
   useEffect(() => {
     const container = containerRef.current;
     const toolbar = toolbarRef.current;
@@ -366,6 +497,11 @@ export const TableDocument = observer(function TableDocument({
         univer.dispose();
         host.remove();
       };
+      const autoHeightTasks = bindTableAutoHeightLifecycle(
+        univer.__getInjector().get(ICommandService),
+        session.table.workbook.id
+      );
+      uiDisposables.add(autoHeightTasks);
       let workbook = univerAPI.createWorkbook(session.table.workbook);
       uiDisposables.add(
         bindTableAutoFit(univer.__getInjector().get(ICommandService), () => {
@@ -386,6 +522,20 @@ export const TableDocument = observer(function TableDocument({
       uiDisposables.add(
         registerTableMultilineEditing(
           univer.__getInjector().get(SheetInterceptorService)
+        )
+      );
+      uiDisposables.add(
+        registerTableCellImages(
+          univer.__getInjector().get(SheetInterceptorService),
+          () => {
+            const render = univer
+              .__getInjector()
+              .get(IRenderManagerService)
+              .getRenderById(workbook.getId());
+            render?.mainComponent?.makeDirty();
+            render?.scene.makeDirty();
+          },
+          INTERCEPTOR_POINT.CELL_CONTENT
         )
       );
       const collaboration =
@@ -466,20 +616,23 @@ export const TableDocument = observer(function TableDocument({
           return;
         }
         const sheet = workbook.getActiveSheet();
+        const otherPeers = peers.filter(
+          (peer) =>
+            peer.clientId !== collaborationClientId &&
+            peer.userId !== auth.user?.id
+        );
         const signature = JSON.stringify(
-          peers
-            .filter((peer) => peer.clientId !== socket?.id)
-            .map((peer) => ({
-              clientId: peer.clientId,
-              name: peer.name,
-              avatarUrl: peer.avatarUrl,
-              color: peer.color,
-              editing: peer.selection?.editing,
-              range:
-                peer.selection?.sheetId === sheet.getSheetId()
-                  ? collaboration.selectionRange(peer.selection)
-                  : null,
-            }))
+          otherPeers.map((peer) => ({
+            clientId: peer.clientId,
+            name: peer.name,
+            avatarUrl: peer.avatarUrl,
+            color: peer.color,
+            editing: peer.selection?.editing,
+            range:
+              peer.selection?.sheetId === sheet.getSheetId()
+                ? collaboration.selectionRange(peer.selection)
+                : null,
+          }))
         );
         if (signature === renderedPresence) {
           return;
@@ -490,11 +643,8 @@ export const TableDocument = observer(function TableDocument({
           string,
           { row: number; column: number; peers: TablePresence[] }
         >();
-        for (const peer of peers) {
-          if (
-            peer.clientId === socket?.id ||
-            peer.selection?.sheetId !== sheet.getSheetId()
-          ) {
+        for (const peer of otherPeers) {
+          if (peer.selection?.sheetId !== sheet.getSheetId()) {
             continue;
           }
           const range = collaboration.selectionRange(peer.selection);
@@ -640,7 +790,10 @@ export const TableDocument = observer(function TableDocument({
       // the portal places its responsive Ribbon beside Outline's title.
       uiDisposables.add(
         univerAPI.registerUIPart(BuiltInUIPart.GLOBAL, () =>
-          createPortal(<Ribbon ribbonType="classic" />, toolbar)
+          createPortal(
+            <Ribbon ribbonType="classic" headerMenu={!mobile} />,
+            toolbar
+          )
         )
       );
       uiDisposables.add(
@@ -659,6 +812,15 @@ export const TableDocument = observer(function TableDocument({
       );
 
       if (mobile) {
+        const subscription = univer
+          .__getInjector()
+          .get(IRibbonService)
+          .activatedTab$.subscribe((tab) => {
+            if (alive) {
+              setHomeToolsVisible(tab === RibbonPosition.START);
+            }
+          });
+        uiDisposables.add({ dispose: () => subscription.unsubscribe() });
         // The mobile preset provides formula editing services but omits the
         // header UI. Keep the native address, editor and expand controls.
         uiDisposables.add(
@@ -672,6 +834,25 @@ export const TableDocument = observer(function TableDocument({
         const input = bindTableMobileInput(host);
         const textEditor = createTableMobileTextEditor(host);
         commitMobileTextEditor = textEditor.commit;
+        const mobileEditing = {
+          start: () => {
+            if (alive && editableRef.current && !session.conflict) {
+              workbook.startEditing();
+            }
+          },
+          cancel: async () => {
+            textEditor.cancel();
+            await workbook.abortEditingAsync();
+          },
+        };
+        mobileEditingRef.current = mobileEditing;
+        uiDisposables.add({
+          dispose: () => {
+            if (mobileEditingRef.current === mobileEditing) {
+              mobileEditingRef.current = undefined;
+            }
+          },
+        });
         uiDisposables.add(input);
         uiDisposables.add(textEditor);
         let headerCanvas: HTMLCanvasElement | undefined;
@@ -783,6 +964,14 @@ export const TableDocument = observer(function TableDocument({
         });
         uiDisposables.add(
           univerAPI.addEvent(univerAPI.Event.BeforeSheetEditStart, (event) => {
+            if (
+              getTableCellImage(
+                event.worksheet.getSheet().getCellRaw(event.row, event.column)
+              )
+            ) {
+              event.cancel = true;
+              return;
+            }
             if (!editableRef.current) {
               event.cancel = true;
               return;
@@ -937,6 +1126,7 @@ export const TableDocument = observer(function TableDocument({
           if (!patchTableCells(univerAPI, workbook, sharedSnapshot, next)) {
             const sheetId = activeSheet.getSheetId();
             clearHighlights();
+            autoHeightTasks.cancel();
             univerAPI.disposeUnit(workbook.getId());
             workbook = univerAPI.createWorkbook(next);
             const sheet =
@@ -1088,15 +1278,597 @@ export const TableDocument = observer(function TableDocument({
           }
         );
       };
+      const getSelection = () => {
+        const selections = univer
+          .__getInjector()
+          .get(SheetsSelectionsService)
+          .getCurrentSelections();
+        const selection = selections[0];
+        if (!alive || !selection || selections.length !== 1) {
+          throw new Error(t("Select one continuous range of cells."));
+        }
+        const sheet = workbook.getActiveSheet();
+        const range = sheet.getRange(selection.range);
+        const bounds = range.getRange();
+        const cellCount =
+          (bounds.endRow - bounds.startRow + 1) *
+          (bounds.endColumn - bounds.startColumn + 1);
+        if (cellCount > 50_000) {
+          throw new Error(t("Select up to 50,000 cells for this operation."));
+        }
+        return { range, bounds, cellCount, sheet };
+      };
+      const getImageTarget = () => {
+        const cell = workbook.getActiveCell();
+        if (!alive || !cell) {
+          throw new Error(t("Select a cell first."));
+        }
+        const sheet = workbook.getActiveSheet();
+        const sheetId = sheet.getSheetId();
+        const range = cell.getRange();
+        const data = sheet
+          .getSheet()
+          .getCellRaw(range.startRow, range.startColumn);
+        return {
+          sheetId,
+          sheetName: sheet.getSheetName(),
+          address: cell.getA1Notation(),
+          row: range.startRow,
+          column: range.startColumn,
+          selection: collaboration?.selection(sheetId, range, false),
+          content: JSON.stringify(data),
+          occupied: !!(
+            data?.f ||
+            data?.p ||
+            data?.si ||
+            (data?.v !== undefined && data.v !== null && data.v !== "")
+          ),
+          image: getTableCellImage(data),
+          size: getTableCellImageSize(data),
+        };
+      };
       const runtime: TableRuntime = {
+        prepareFreeze: () => {
+          const sheet = workbook.getActiveSheet();
+          const range = workbook.getActiveRange()?.getA1Notation();
+          const activeCell = workbook.getActiveCell();
+          const cell = activeCell?.getA1Notation();
+          const cellRange = activeCell?.getRange();
+          const previousFreeze = structuredClone(sheet.getFreeze());
+          const assertTarget = () => {
+            if (!alive || !editableRef.current || session.conflict) {
+              throw new Error(
+                t("This table is read only or no longer available.")
+              );
+            }
+            const currentSheet = workbook.getActiveSheet();
+            if (
+              currentSheet.getSheetId() !== sheet.getSheetId() ||
+              workbook.getActiveRange()?.getA1Notation() !== range ||
+              workbook.getActiveCell()?.getA1Notation() !== cell
+            ) {
+              throw new Error(t("The selection changed. Select it again."));
+            }
+            if (!equal(currentSheet.getFreeze(), previousFreeze)) {
+              throw new Error(
+                t("The freeze settings changed. Open the freeze menu again.")
+              );
+            }
+          };
+          return {
+            destination: `${sheet.getSheetName()} · ${cell ?? range ?? ""}`,
+            frozenRows: Math.max(0, previousFreeze.ySplit),
+            frozenColumns: Math.max(0, previousFreeze.xSplit),
+            apply: async (mode) => {
+              assertTarget();
+              await commit();
+              assertTarget();
+              if (mode === "selection" && !cellRange) {
+                throw new Error(t("Select a cell first."));
+              }
+              const rows =
+                mode === "firstRow"
+                  ? 1
+                  : mode === "selection"
+                    ? Math.max(1, cellRange?.startRow ?? 0)
+                    : 0;
+              const columns =
+                mode === "firstColumn"
+                  ? 1
+                  : mode === "selection"
+                    ? Math.max(1, cellRange?.startColumn ?? 0)
+                    : 0;
+              const params = {
+                unitId: workbook.getId(),
+                subUnitId: sheet.getSheetId(),
+                startRow: rows || -1,
+                startColumn: columns || -1,
+                ySplit: rows,
+                xSplit: columns,
+              };
+              if (
+                !(await univerAPI.executeCommand(
+                  mode === "none"
+                    ? CancelFrozenCommand.id
+                    : SetFrozenCommand.id,
+                  params
+                ))
+              ) {
+                throw new Error(t("Could not update this table."));
+              }
+              await commit();
+            },
+          };
+        },
+        getSelectionText: () => {
+          const { range } = getSelection();
+          return selectionToTSV(range.getDisplayValues());
+        },
+        prepareClearSelection: () => {
+          if (!editableRef.current || session.conflict) {
+            throw new Error(
+              t("This table is read only or no longer available.")
+            );
+          }
+          const { range, bounds, cellCount, sheet } = getSelection();
+          const sheetId = sheet.getSheetId();
+          const previous = structuredClone(range.getCellDatas());
+          const merges = structuredClone(
+            sheet.getSheet().getSnapshot().mergeData ?? []
+          );
+          if (
+            merges.some(
+              (merge) =>
+                merge.startRow <= bounds.endRow &&
+                merge.endRow >= bounds.startRow &&
+                merge.startColumn <= bounds.endColumn &&
+                merge.endColumn >= bounds.startColumn
+            )
+          ) {
+            throw new Error(
+              t("Unmerge the destination cells before clearing data.")
+            );
+          }
+          const rowCount = sheet.getMaxRows();
+          const columnCount = sheet.getMaxColumns();
+          return {
+            destination: `${sheet.getSheetName()} · ${range.getA1Notation()}`,
+            cellCount,
+            apply: async () => {
+              await commit();
+              const destination = workbook.getSheetBySheetId(sheetId);
+              if (
+                !alive ||
+                !editableRef.current ||
+                session.conflict ||
+                !destination
+              ) {
+                throw new Error(
+                  t("This table is read only or no longer available.")
+                );
+              }
+              const target = destination.getRange(bounds);
+              if (
+                rowCount !== destination.getMaxRows() ||
+                columnCount !== destination.getMaxColumns() ||
+                !equal(previous, target.getCellDatas()) ||
+                !equal(
+                  merges,
+                  destination.getSheet().getSnapshot().mergeData ?? []
+                )
+              ) {
+                throw new Error(
+                  t(
+                    "The selection changed. Select the cells again before clearing their contents."
+                  )
+                );
+              }
+              target.setValues(clearTableSelectionValues(previous));
+              if (
+                target
+                  .getCellDatas()
+                  .some((row) =>
+                    row.some(
+                      (cell) =>
+                        (cell?.v !== null && cell?.v !== undefined) ||
+                        cell?.f ||
+                        cell?.p ||
+                        cell?.si ||
+                        cell?.custom?.outlineImage
+                    )
+                  )
+              ) {
+                throw new Error(
+                  t(
+                    "Could not clear this selection. Check the destination editing permissions."
+                  )
+                );
+              }
+              await commit();
+            },
+          };
+        },
+        getPasteTarget: () => {
+          const sheet = workbook.getActiveSheet();
+          const selection = workbook.getActiveRange()?.getRange();
+          if (!selection || !editableRef.current || session.conflict) {
+            return undefined;
+          }
+          const sheetId = sheet.getSheetId();
+          const { startRow, startColumn } = selection;
+          return {
+            prepare: (data) => {
+              const currentSheet = workbook.getSheetBySheetId(sheetId);
+              if (
+                !alive ||
+                !editableRef.current ||
+                session.conflict ||
+                !currentSheet ||
+                startRow + data.rowCount > currentSheet.getMaxRows() ||
+                startColumn + data.columnCount > currentSheet.getMaxColumns()
+              ) {
+                throw new Error(
+                  t(
+                    "This paste exceeds the worksheet size or the destination is no longer editable."
+                  )
+                );
+              }
+              const range = currentSheet.getRange(
+                startRow,
+                startColumn,
+                data.rowCount,
+                data.columnCount
+              );
+              const bounds = range.getRange();
+              const merges = structuredClone(
+                currentSheet.getSheet().getSnapshot().mergeData ?? []
+              );
+              if (
+                merges.some(
+                  (merge) =>
+                    merge.startRow <= bounds.endRow &&
+                    merge.endRow >= bounds.startRow &&
+                    merge.startColumn <= bounds.endColumn &&
+                    merge.endColumn >= bounds.startColumn
+                )
+              ) {
+                throw new Error(
+                  t("Unmerge the destination cells before pasting data.")
+                );
+              }
+              const previous = structuredClone(range.getCellDatas());
+              const rowCount = currentSheet.getMaxRows();
+              const columnCount = currentSheet.getMaxColumns();
+              const { values, occupiedCells } = buildTablePasteValues(
+                data,
+                previous
+              );
+              return {
+                destination: `${currentSheet.getSheetName()} · ${range.getA1Notation()}`,
+                occupiedCells,
+                apply: async () => {
+                  await commit();
+                  const destination = workbook.getSheetBySheetId(sheetId);
+                  if (
+                    !alive ||
+                    !editableRef.current ||
+                    session.conflict ||
+                    !destination
+                  ) {
+                    throw new Error(
+                      t("This table is read only or no longer available.")
+                    );
+                  }
+                  const target = destination.getRange(
+                    startRow,
+                    startColumn,
+                    data.rowCount,
+                    data.columnCount
+                  );
+                  if (
+                    rowCount !== destination.getMaxRows() ||
+                    columnCount !== destination.getMaxColumns() ||
+                    !equal(previous, target.getCellDatas()) ||
+                    !equal(
+                      merges,
+                      destination.getSheet().getSnapshot().mergeData ?? []
+                    )
+                  ) {
+                    throw new Error(
+                      t(
+                        "The destination changed. Preview the paste again before replacing its contents."
+                      )
+                    );
+                  }
+                  target.setValues(values);
+                  const written = target.getCellDatas();
+                  if (
+                    !values.every((row, index) =>
+                      row.every(
+                        (cell, column) =>
+                          written[index]?.[column]?.v === cell.v &&
+                          !written[index]?.[column]?.f &&
+                          !written[index]?.[column]?.p &&
+                          !written[index]?.[column]?.si
+                      )
+                    )
+                  ) {
+                    throw new Error(
+                      t(
+                        "Could not paste this data. Check the destination editing permissions."
+                      )
+                    );
+                  }
+                  await commit();
+                },
+              };
+            },
+          };
+        },
+        importCSV: async (data, name) => {
+          await commit();
+          if (!alive || !editableRef.current || session.conflict) {
+            throw new Error(
+              t("This table is read only or no longer available.")
+            );
+          }
+          const snapshot = workbook.save();
+          const sheet = mergeWorksheetSnapshotWithDefault(
+            createCSVWorksheet(
+              data,
+              name,
+              workbook.getSheets().map((item) => item.getSheetName())
+            )
+          );
+          const id = uuid();
+          const candidate = {
+            ...snapshot,
+            sheetOrder: [...snapshot.sheetOrder, id],
+            sheets: { ...snapshot.sheets, [id]: { ...sheet, id } },
+          };
+          // Validate the complete document limit before executing any mutation.
+          tableDocumentToMarkdown({
+            format: "outline-table",
+            version: 2,
+            workbook: candidate,
+          });
+          workbook.insertSheet(sheet.name, { sheet: { ...sheet, id } });
+          await commit();
+        },
+        exportCSV: async () => {
+          await commit();
+          if (!alive) {
+            throw new Error(t("This table is no longer available."));
+          }
+          const sheet = workbook.getActiveSheet();
+          return {
+            name: sheet.getSheetName(),
+            text: worksheetToCSV(sheet.getSheet().getSnapshot()),
+          };
+        },
         commit,
         flush,
         setEditable,
         setDarkMode: (dark) => univerAPI.toggleDarkMode(dark),
         setScriptsAvailable: scriptMenu?.setAvailable,
         updatePresence,
+        images: {
+          subscribeViewRequest: (listener) => {
+            const subscription = univerAPI.addEvent(
+              univerAPI.Event.BeforeSheetEditStart,
+              (event) => {
+                if (
+                  getTableCellImage(
+                    event.worksheet
+                      .getSheet()
+                      .getCellRaw(event.row, event.column)
+                  )
+                ) {
+                  event.cancel = true;
+                  listener();
+                }
+              }
+            );
+            return () => subscription.dispose();
+          },
+          getSelectedImage: () => {
+            if (!alive || !workbook.getActiveCell()) {
+              return;
+            }
+            const selections = univer
+              .__getInjector()
+              .get(SheetsSelectionsService)
+              .getCurrentSelections();
+            if (
+              selections.length !== 1 ||
+              selections[0].range.rangeType === RANGE_TYPE.ROW ||
+              selections[0].range.rangeType === RANGE_TYPE.COLUMN
+            ) {
+              return;
+            }
+            const target = getImageTarget();
+            return target.image ? target : undefined;
+          },
+          subscribeSelection: (listener) => {
+            const subscriptions = [
+              univerAPI.addEvent(univerAPI.Event.SelectionChanged, listener),
+              univerAPI.addEvent(univerAPI.Event.SheetValueChanged, listener),
+              univerAPI.addEvent(univerAPI.Event.ActiveSheetChanged, listener),
+              univer
+                .__getInjector()
+                .get(ICommandService)
+                .onCommandExecuted((command) => {
+                  if (command.type === CommandType.MUTATION) {
+                    listener();
+                  }
+                }),
+            ];
+            return () =>
+              subscriptions.forEach((subscription) => subscription.dispose());
+          },
+          getTarget: async () => {
+            if (!alive) {
+              throw new Error(t("This table is no longer available."));
+            }
+            await commit();
+            if (!alive) {
+              throw new Error(t("This table is no longer available."));
+            }
+            return getImageTarget();
+          },
+          setImage: async (target, image, size) => {
+            if (!alive || !editableRef.current || session.conflict) {
+              throw new Error(
+                t("This table is read only or no longer available.")
+              );
+            }
+            await commit();
+            if (!alive || !editableRef.current || session.conflict) {
+              throw new Error(
+                t("This table is read only or no longer available.")
+              );
+            }
+            const range = target.selection
+              ? collaboration?.selectionRange(target.selection)
+              : undefined;
+            const sheet = workbook.getSheetBySheetId(target.sheetId);
+            if (!sheet || (target.selection && !range)) {
+              throw new Error(
+                t("The selected cell was removed. Select a cell and try again.")
+              );
+            }
+            const row = range?.startRow ?? target.row;
+            const column = range?.startColumn ?? target.column;
+            const cell = sheet.getRange(row, column);
+            const data = sheet.getSheet().getCellRaw(row, column);
+            if (JSON.stringify(data) !== target.content) {
+              throw new Error(
+                t(
+                  "This cell changed. Select it again before updating its image."
+                )
+              );
+            }
+            const next =
+              image && size !== undefined
+                ? setTableCellImageSize(setTableCellImage(data, image), size)
+                : setTableCellImage(data, image);
+            cell.setValue(next);
+            if (
+              !equal(
+                sheet.getSheet().getCellRaw(row, column)?.custom,
+                next.custom
+              )
+            ) {
+              throw new Error(
+                t(
+                  "Could not update this image. Check the cell editing permissions."
+                )
+              );
+            }
+            if (image) {
+              const displaySize = getTableCellImageSize(next);
+              const worksheet = sheet.getSheet();
+              sheet.setRowHeight(
+                row,
+                Math.max(
+                  worksheet.getRowHeight(row),
+                  displaySize
+                    ? displaySize.height + 8
+                    : Math.min(image.height + 8, 160)
+                )
+              );
+              sheet.setColumnWidth(
+                column,
+                Math.max(
+                  worksheet.getColumnWidth(column),
+                  displaySize
+                    ? displaySize.width + 8
+                    : Math.min(image.width + 8, 200)
+                )
+              );
+            }
+            await commit();
+            const current = sheet.getSheet().getCellRaw(row, column);
+            return {
+              sheetId: sheet.getSheetId(),
+              sheetName: sheet.getSheetName(),
+              address: cell.getA1Notation(),
+              row,
+              column,
+              selection: collaboration?.selection(
+                sheet.getSheetId(),
+                cell.getRange(),
+                false
+              ),
+              content: JSON.stringify(current),
+              occupied: false,
+              image: getTableCellImage(current),
+              size: getTableCellImageSize(current),
+            };
+          },
+        },
       };
       runtimeRef.current = runtime;
+      if (mobile) {
+        const selections = univer.__getInjector().get(SheetsSelectionsService);
+        const updateSelectionLabel = () => {
+          if (!alive) {
+            return;
+          }
+          const current = selections.getCurrentSelections();
+          const selection = current[0];
+          const sheet = workbook.getActiveSheet();
+          const range = selection ? sheet.getRange(selection.range) : undefined;
+          setSelectionLabel(
+            current.length > 1
+              ? t("{{ count }} ranges selected", { count: current.length })
+              : range
+                ? `${sheet.getSheetName()} · ${range.getA1Notation()}`
+                : ""
+          );
+        };
+        const selectionSubscription =
+          selections.selectionMoveEnd$.subscribe(updateSelectionLabel);
+        uiDisposables.add({
+          dispose: () => selectionSubscription.unsubscribe(),
+        });
+        const selectionSetSubscription =
+          selections.selectionSet$.subscribe(updateSelectionLabel);
+        uiDisposables.add({
+          dispose: () => selectionSetSubscription.unsubscribe(),
+        });
+        const selectionMovingSubscription =
+          selections.selectionMoving$.subscribe(updateSelectionLabel);
+        uiDisposables.add({
+          dispose: () => selectionMovingSubscription.unsubscribe(),
+        });
+        uiDisposables.add(
+          univerAPI.addEvent(
+            univerAPI.Event.ActiveSheetChanged,
+            updateSelectionLabel
+          )
+        );
+        updateSelectionLabel();
+      }
+      uiDisposables.add(
+        univerAPI.addEvent(univerAPI.Event.BeforeClipboardPaste, (event) => {
+          if (
+            workbook.isCellEditing() ||
+            host.ownerDocument.activeElement?.classList.contains(
+              "outline-table-mobile-text-editor"
+            ) ||
+            !event.text ||
+            !/[\t\r\n]/.test(event.text)
+          ) {
+            return;
+          }
+          event.cancel = true;
+          const target = runtime.getPasteTarget();
+          if (target && alive) {
+            setPasteRequest({ target, initialText: event.text });
+          }
+        })
+      );
       if (mobile) {
         uiDisposables.add(
           univerAPI.registerUIPart(BuiltInUIPart.FOOTER, () => (
@@ -1187,6 +1959,83 @@ export const TableDocument = observer(function TableDocument({
     runtimeRef.current?.setScriptsAvailable?.(scriptsAvailable);
   }, [ready, scriptsAvailable]);
 
+  const handleCopySelection = async () => {
+    if (!abilities.download) {
+      return;
+    }
+    try {
+      const text = runtimeRef.current?.getSelectionText();
+      if (text === undefined) {
+        return;
+      }
+      const copied = navigator.clipboard
+        ? await navigator.clipboard.writeText(text).then(
+            () => true,
+            () => copy(text, { format: "text/plain" })
+          )
+        : copy(text, { format: "text/plain" });
+      if (!copied) {
+        toast.error(
+          t("Could not copy this selection. Check your clipboard permissions.")
+        );
+        return;
+      }
+      toast.success(t("Copied to clipboard"));
+    } catch (error) {
+      toast.error(
+        error instanceof Error
+          ? error.message
+          : t("Could not copy this selection.")
+      );
+    }
+  };
+  const handleRenameSubmit = (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    if (!renameRequest || !editable || !sessionLoaded || session.conflict) {
+      return;
+    }
+    if (session.title !== renameRequest.originalTitle) {
+      toast.error(t("The title changed. Open rename again."));
+      return;
+    }
+    const title = renameRequest.value.trim();
+    if (!title) {
+      return;
+    }
+    session.setTitle(title);
+    setRenameRequest(undefined);
+    void handleSave();
+  };
+  const handleClearSelection = () => {
+    try {
+      const operation = runtimeRef.current?.prepareClearSelection();
+      if (!operation) {
+        return;
+      }
+      dialogs.openModal({
+        title: t("Clear selection"),
+        content: (
+          <ConfirmationDialog
+            danger
+            submitText={t("Clear contents")}
+            onSubmit={operation.apply}
+          >
+            {t(
+              "Clear the contents and images in {{ destination }} ({{ count }} cells)? Cell formatting will be preserved.",
+              { destination: operation.destination, count: operation.cellCount }
+            )}
+          </ConfirmationDialog>
+        ),
+      });
+    } catch (error) {
+      toast.error(
+        error instanceof Error
+          ? error.message
+          : t("Could not clear this selection.")
+      );
+    }
+  };
+
   const handleDownload = useCallback(async () => {
     try {
       await runtimeRef.current?.commit();
@@ -1259,22 +2108,26 @@ export const TableDocument = observer(function TableDocument({
       ? "conflict"
       : session.error
         ? "error"
-        : session.isSaving
-          ? "saving"
-          : session.dirty || cellEditing
-            ? "pending"
-            : "saved";
+        : !sessionLoaded || !ready
+          ? "loading"
+          : session.isSaving
+            ? "saving"
+            : session.dirty || cellEditing
+              ? "pending"
+              : "saved";
   const status = !editable
     ? t("Read only")
     : session.conflict
       ? t("Save conflict")
       : session.error
         ? t("Not saved")
-        : session.isSaving
-          ? t("Saving…")
-          : session.dirty || cellEditing
-            ? t("Unsaved changes")
-            : t("All changes saved");
+        : !sessionLoaded || !ready
+          ? t("Loading…")
+          : session.isSaving
+            ? t("Saving…")
+            : session.dirty || cellEditing
+              ? t("Unsaved changes")
+              : t("All changes saved");
 
   return (
     <Workspace
@@ -1287,11 +2140,12 @@ export const TableDocument = observer(function TableDocument({
       {mobile && <MobileNativeEditorStyles />}
       <PageTitle title={session.title || t("Untitled")} />
       <Prompt when={editable} message={TABLE_SAVE_PROMPT} />
-      <VisuallyHidden.Root role="status" aria-live="polite">
-        {status}
-      </VisuallyHidden.Root>
-      <Toolbar data-table-toolbar>
-        <TitleArea>
+      <Toolbar
+        data-table-toolbar
+        $mobile={mobile}
+        $home={homeToolsVisible || cellEditing}
+      >
+        <TitleArea data-table-title-area>
           {!shareId && (
             <SidebarButton
               aria-label={t("Open sidebar")}
@@ -1300,39 +2154,153 @@ export const TableDocument = observer(function TableDocument({
               onClick={ui.toggleMobileSidebar}
             />
           )}
-          <TitleInput
-            ref={titleRef}
-            aria-label={t("Document title")}
-            maxLength={DocumentValidation.maxTitleLength}
-            placeholder={t("Untitled")}
-            title={session.title || t("Untitled")}
-            value={session.title}
-            readOnly={!editable || !sessionLoaded}
-            onChange={(event) => session.setTitle(event.target.value)}
-            onBlur={() => {
-              if (editable && session.dirty && !session.conflict) {
-                void handleSave();
-              }
-            }}
-          />
+          <TitleDetails>
+            <TitleInput
+              ref={titleRef}
+              aria-label={t("Document title")}
+              maxLength={DocumentValidation.maxTitleLength}
+              placeholder={t("Untitled")}
+              title={session.title || t("Untitled")}
+              value={session.title}
+              readOnly={!editable || !sessionLoaded || mobile}
+              onChange={(event) => session.setTitle(event.target.value)}
+              onBlur={() => {
+                if (editable && session.dirty && !session.conflict) {
+                  void handleSave();
+                }
+              }}
+            />
+            <SaveStatus
+              role="status"
+              aria-live="polite"
+              aria-atomic="true"
+              title={status}
+              $failed={state === "error" || state === "conflict"}
+              data-table-save-status
+            >
+              {status}
+            </SaveStatus>
+          </TitleDetails>
         </TitleArea>
         <NativeTools
           ref={toolbarRef}
+          data-table-native-tools
           className={theme.isDark ? "univer-dark" : undefined}
           aria-label={t("Table tools")}
         />
-        <DocumentActions>
+        <CellActions
+          $mobile={mobile}
+          $visible={!mobile || homeToolsVisible || cellEditing}
+          role="group"
+          aria-label={t("Selection tools")}
+          data-table-cell-tools
+        >
+          {mobile && editable && (
+            <Button
+              neutral
+              icon={<TableIcon />}
+              aria-label={t("Freeze")}
+              title={t("Freeze")}
+              disabled={!ready || cellEditing || session.conflict}
+              onClick={() =>
+                setFreezeTarget(runtimeRef.current?.prepareFreeze())
+              }
+            />
+          )}
+          <TableCellImageControl
+            documentId={document.id}
+            editable={editable}
+            ready={ready && sessionLoaded}
+            workspaceRef={workspaceRef}
+            getController={getImageController}
+            canDownload={!!abilities.download}
+            mobile={mobile}
+          />
+          {mobile && abilities.download && (
+            <Button
+              neutral
+              icon={<CopyIcon />}
+              aria-label={t("Copy selection")}
+              title={t("Copy selection")}
+              disabled={!ready || cellEditing || !selectionLabel}
+              onClick={handleCopySelection}
+            />
+          )}
+          {mobile && editable && (
+            <>
+              <Button
+                neutral
+                icon={<ImportIcon />}
+                aria-label={t("Paste data")}
+                title={t("Paste data")}
+                disabled={!ready || cellEditing || session.conflict}
+                onClick={() => {
+                  const target = runtimeRef.current?.getPasteTarget();
+                  if (target) {
+                    setPasteRequest({ target });
+                  }
+                }}
+              />
+              <Button
+                neutral
+                icon={<ClearContentsIcon icon={faEraser} />}
+                aria-label={t("Clear contents")}
+                title={t("Clear contents")}
+                disabled={
+                  !ready || cellEditing || session.conflict || !selectionLabel
+                }
+                onClick={handleClearSelection}
+              />
+            </>
+          )}
+          {editable && mobile && !cellEditing && (
+            <Button
+              neutral
+              icon={<EditIcon />}
+              aria-label={t("Edit cell")}
+              title={t("Edit cell")}
+              disabled={!ready || !sessionLoaded || session.conflict}
+              onClick={() => mobileEditingRef.current?.start()}
+            />
+          )}
+          {editable && mobile && cellEditing && (
+            <Button
+              neutral
+              icon={<CloseIcon />}
+              aria-label={t("Cancel editing")}
+              title={t("Cancel editing")}
+              disabled={!ready}
+              onPointerDown={(event: PointerEvent<HTMLButtonElement>) =>
+                event.preventDefault()
+              }
+              onMouseDown={(event: MouseEvent<HTMLButtonElement>) =>
+                event.preventDefault()
+              }
+              onClick={() => {
+                void mobileEditingRef.current?.cancel().catch((error) => {
+                  toast.error(error.message);
+                });
+              }}
+            />
+          )}
+          {editable && mobile && cellEditing && (
+            <Button
+              neutral
+              icon={<CheckmarkIcon />}
+              aria-label={t("Done")}
+              title={t("Done")}
+              disabled={!ready}
+              onClick={handleSave}
+            />
+          )}
+        </CellActions>
+        <DocumentActions data-table-document-actions>
           {session instanceof TableCollaborationSession && (
             <TableCollaborators
               document={document}
               session={session}
               mobile={mobile}
             />
-          )}
-          {editable && mobile && cellEditing && (
-            <Button neutral disabled={!ready} onClick={handleSave}>
-              {t("Done")}
-            </Button>
           )}
           {auth.user && (
             <TableDocumentMenu
@@ -1341,9 +2309,24 @@ export const TableDocument = observer(function TableDocument({
               saveDisabled={!ready || session.isSaving || session.conflict}
               status={status}
               onSave={handleSave}
+              onExportCSV={handleExportCSV}
+              onImportCSV={() => setImportCSVOpen(true)}
+              onPaste={() => {
+                const target = runtimeRef.current?.getPasteTarget();
+                if (target) {
+                  setPasteRequest({ target });
+                }
+              }}
               onRename={
                 editable
                   ? () => {
+                      if (mobile) {
+                        setRenameRequest({
+                          originalTitle: session.title,
+                          value: session.title,
+                        });
+                        return;
+                      }
                       titleRef.current?.focus();
                       titleRef.current?.select();
                     }
@@ -1363,6 +2346,124 @@ export const TableDocument = observer(function TableDocument({
         </DocumentActions>
       </Toolbar>
       <Notices document={document} readOnly={readOnly} />
+      <Modal
+        isOpen={!!renameRequest}
+        onRequestClose={() => setRenameRequest(undefined)}
+        title={t("Rename")}
+      >
+        <RenameForm onSubmit={handleRenameSubmit}>
+          <Input
+            label={t("Document title")}
+            value={renameRequest?.value ?? ""}
+            maxLength={DocumentValidation.maxTitleLength}
+            placeholder={t("Untitled")}
+            disabled={!editable || !sessionLoaded || session.conflict}
+            onChange={(event) => {
+              const value = event.target.value;
+              setRenameRequest((request) =>
+                request ? { ...request, value } : undefined
+              );
+            }}
+          />
+          <RenameActions>
+            <Button neutral onClick={() => setRenameRequest(undefined)}>
+              {t("Cancel")}
+            </Button>
+            <Button
+              type="submit"
+              disabled={
+                !editable ||
+                !sessionLoaded ||
+                session.conflict ||
+                !renameRequest?.value.trim()
+              }
+            >
+              {t("Rename")}
+            </Button>
+          </RenameActions>
+        </RenameForm>
+      </Modal>
+      <Modal
+        isOpen={!!freezeTarget}
+        onRequestClose={() => {
+          if (!freezeRunning.current) {
+            setFreezeTarget(undefined);
+          }
+        }}
+        title={t("Freeze")}
+      >
+        <FreezeOptions>
+          <p>{freezeTarget?.destination}</p>
+          <p data-table-freeze-status>
+            {t("Frozen rows: {{ rows }}; frozen columns: {{ columns }}", {
+              rows: freezeTarget?.frozenRows ?? 0,
+              columns: freezeTarget?.frozenColumns ?? 0,
+            })}
+          </p>
+          {(
+            [
+              ["firstRow", t("Freeze first row")],
+              ["firstColumn", t("Freeze first column")],
+              ["selection", t("Freeze to current cell")],
+              ["none", t("Unfreeze")],
+            ] satisfies [TableFreezeMode, string][]
+          ).map(([mode, label]) => (
+            <Button
+              key={mode}
+              disabled={
+                freezeBusy ||
+                !editable ||
+                session.conflict ||
+                (mode === "none" &&
+                  !freezeTarget?.frozenRows &&
+                  !freezeTarget?.frozenColumns)
+              }
+              onClick={async () => {
+                if (!freezeTarget || freezeRunning.current) {
+                  return;
+                }
+                freezeRunning.current = true;
+                setFreezeBusy(true);
+                try {
+                  await freezeTarget.apply(mode);
+                  setFreezeTarget(undefined);
+                } catch (error) {
+                  toast.error(
+                    error instanceof Error
+                      ? error.message
+                      : t("Could not update this table.")
+                  );
+                } finally {
+                  freezeRunning.current = false;
+                  setFreezeBusy(false);
+                }
+              }}
+            >
+              {label}
+            </Button>
+          ))}
+          {freezeBusy && <p role="status">{t("Saving…")}</p>}
+        </FreezeOptions>
+      </Modal>
+      {pasteRequest && (
+        <Suspense fallback={null}>
+          <TablePasteDialog
+            target={pasteRequest.target}
+            initialText={pasteRequest.initialText}
+            editable={editable && ready && !session.conflict}
+            onClose={() => setPasteRequest(undefined)}
+          />
+        </Suspense>
+      )}
+      {importCSVOpen && (
+        <Suspense fallback={null}>
+          <TableCSVImportDialog
+            editable={editable && ready && !session.conflict}
+            onClose={() => setImportCSVOpen(false)}
+            onImport={handleImportCSV}
+          />
+        </Suspense>
+      )}
       {editorError && (
         <Notice role="alert">
           <span>
@@ -1465,7 +2566,64 @@ const MobileViewportStyles = createGlobalStyle`
   }
 `;
 
+const FreezeOptions = styled.div`
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+  p {
+    margin: 0;
+    overflow-wrap: anywhere;
+  }
+  button {
+    min-height: 44px;
+  }
+`;
+const RenameForm = styled.form`
+  width: 100%;
+  min-width: 0;
+`;
+const RenameActions = styled.div`
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 16px;
+  button {
+    min-height: 44px;
+  }
+`;
+const ClearContentsIcon = styled(FontAwesomeIcon)`
+  width: 24px;
+  height: 24px;
+  padding: 3px;
+  box-sizing: border-box;
+`;
+const CellActions = styled.div<{ $mobile: boolean; $visible: boolean }>`
+  grid-column: 3;
+  grid-row: 1;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  ${({ $mobile, $visible }) =>
+    $mobile &&
+    css`
+      display: ${$visible ? "flex" : "none"};
+      grid-column: 1;
+      grid-row: 3;
+      min-width: 0;
+      padding-inline: 4px;
+      border-top: 1px solid ${({ theme }) => theme.divider};
+      height: 44px;
+      box-sizing: border-box;
+      button {
+        min-width: 36px;
+        min-height: 40px;
+      }
+    `}
+`;
+
 const Workspace = styled.div`
+  position: relative;
   display: flex;
   flex-direction: column;
   height: 100vh;
@@ -1549,15 +2707,46 @@ const MobileNativeEditorStyles = createGlobalStyle`
     user-select: text;
   }
 `;
-const Toolbar = styled.div`
+const Toolbar = styled.div<{ $mobile: boolean; $home: boolean }>`
   position: relative;
   display: grid;
-  grid-template-columns: minmax(0, min(40%, 240px)) minmax(0, 1fr) auto;
+  grid-template-columns: minmax(0, min(40%, 240px)) minmax(0, 1fr) auto auto;
   grid-template-rows: 48px 44px;
   align-items: center;
   flex-shrink: 0;
   box-sizing: border-box;
   border-bottom: 1px solid ${({ theme }) => theme.divider};
+
+  @media (pointer: coarse) {
+    grid-template-rows: 60px 44px;
+  }
+
+  ${({ $mobile, $home }) =>
+    $mobile &&
+    css`
+      grid-template-columns: ${$home ? "auto" : "0px"} minmax(0, 1fr) auto;
+      grid-template-rows: 60px 36px 44px;
+
+      > [data-table-title-area] {
+        grid-column: 1 / 3;
+      }
+
+      > [data-table-document-actions] {
+        grid-column: 3;
+      }
+
+      && [data-u-comp="ribbon-header-menu"] {
+        grid-column: 1 / -1;
+        grid-row: 2;
+        overflow: hidden;
+      }
+
+      && [data-table-native-tools] > .univer-grid {
+        grid-column: 2 / -1;
+        grid-row: 3;
+        padding-inline: 0 4px;
+      }
+    `}
 `;
 const TitleArea = styled.div`
   grid-column: 1;
@@ -1577,7 +2766,9 @@ const TitleInput = styled.input`
   font-weight: 600;
   border: 1px solid transparent;
   border-radius: 4px;
-  padding: 6px;
+  padding: 2px 6px;
+  box-sizing: border-box;
+  min-height: 28px;
   text-overflow: ellipsis;
   @media (pointer: coarse) {
     font-size: 16px;
@@ -1587,6 +2778,24 @@ const TitleInput = styled.input`
     border-color: ${({ theme }) => theme.inputBorderFocused};
     outline: none;
   }
+`;
+const TitleDetails = styled.div`
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-width: 0;
+`;
+const SaveStatus = styled.span<{ $failed: boolean }>`
+  display: block;
+  min-width: 0;
+  padding-inline: 6px;
+  font-size: 11px;
+  line-height: 14px;
+  color: ${({ theme, $failed }) =>
+    $failed ? theme.danger : theme.textSecondary};
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 `;
 const NativeTools = styled.div`
   /* The two native Ribbon rows participate in Outline's header grid. */
@@ -1643,7 +2852,7 @@ const NativeTools = styled.div`
   }
 `;
 const DocumentActions = styled.div`
-  grid-column: 3;
+  grid-column: 4;
   grid-row: 1;
   display: flex;
   align-items: center;

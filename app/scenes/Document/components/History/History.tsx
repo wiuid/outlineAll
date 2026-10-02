@@ -6,6 +6,7 @@ import { useTranslation } from "react-i18next";
 import { useHistory, useRouteMatch } from "react-router-dom";
 import { Pagination } from "@shared/constants";
 import { RevisionHelper } from "@shared/utils/RevisionHelper";
+import { getTableDocument } from "@shared/utils/tableDocument";
 import Revision from "~/models/Revision";
 import Empty from "~/components/Empty";
 import PaginatedEventList from "./PaginatedEventList";
@@ -101,6 +102,11 @@ function History() {
   );
 
   const selectedRevisionId = historyMatch?.params.revisionId;
+  const selectedRevision = selectedRevisionId
+    ? revisions.get(selectedRevisionId)
+    : undefined;
+  const tableHistory =
+    !!document?.tableContent || !!getTableDocument(selectedRevision?.data);
 
   // Reset "Compare to" when the user clicks a different revision in the list,
   // but not on initial mount (which would break deep links with ?compareTo=…)
@@ -255,17 +261,35 @@ function History() {
   useKeyDown("Escape", onCloseHistory);
 
   return (
-    <Sidebar title={t("History")} onClose={onCloseHistory} scrollable={false}>
-      <HighlightChangesControl
-        showChanges={showChanges}
-        onShowChangesToggle={handleShowChangesToggle}
-        items={items}
-        document={document}
-        selectedRevisionId={selectedRevisionId}
-        compareTo={compareTo}
-        onCompareToChange={handleCompareToChange}
-      />
-      <Scrollable hiddenScrollbars topShadow>
+    <Sidebar
+      key={
+        tableHistory && isMobile ? (selectedRevisionId ?? "current") : undefined
+      }
+      defaultOpen={!tableHistory || !selectedRevisionId}
+      title={t("History")}
+      onClose={onCloseHistory}
+      scrollable={false}
+    >
+      {!tableHistory && (
+        <HighlightChangesControl
+          showChanges={showChanges}
+          onShowChangesToggle={handleShowChangesToggle}
+          items={items}
+          document={document}
+          selectedRevisionId={selectedRevisionId}
+          compareTo={compareTo}
+          onCompareToChange={handleCompareToChange}
+        />
+      )}
+      <Scrollable
+        hiddenScrollbars
+        topShadow
+        style={
+          tableHistory && isMobile
+            ? { height: "70dvh", maxHeight: "calc(90dvh - 64px)", flex: "none" }
+            : undefined
+        }
+      >
         {document ? (
           <PaginatedEventList
             aria-label={t("History")}

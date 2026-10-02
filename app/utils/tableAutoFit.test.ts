@@ -1,6 +1,10 @@
 import { CommandType, RANGE_TYPE } from "@univerjs/core";
 import type { CommandListener, IRange } from "@univerjs/core";
-import { bindTableAutoFit, getTableAutoFitRanges } from "./tableAutoFit";
+import {
+  bindTableAutoFit,
+  bindTableAutoHeightLifecycle,
+  getTableAutoFitRanges,
+} from "./tableAutoFit";
 
 const row = (start: number, end = start): IRange => ({
   startRow: start,
@@ -84,6 +88,48 @@ describe("header double-click auto-fit ranges", () => {
 });
 
 describe("native gesture command binding", () => {
+  it("cancels only this workbook's pending measurements before disposal", () => {
+    let listener: CommandListener = () => {};
+    const unsubscribe = vi.fn();
+    const execute = vi.fn();
+    const lifecycle = bindTableAutoHeightLifecycle(
+      {
+        onCommandExecuted: (callback) => {
+          listener = callback;
+          return { dispose: unsubscribe };
+        },
+        syncExecuteCommand: execute,
+      },
+      "book"
+    );
+    const notify = (unitId: string, id: string, canceled = false) => {
+      listener({
+        id: canceled
+          ? "sheet.operation.cancel-mark-dirty-row-auto-height"
+          : "sheet.operation.mark-dirty-row-auto-height",
+        type: CommandType.OPERATION,
+        params: { unitId, id },
+      });
+    };
+    notify("book", "pending");
+    notify("other-book", "other");
+    notify("book", "already-canceled");
+    notify("book", "already-canceled", true);
+    lifecycle.cancel();
+    expect(execute).toHaveBeenCalledExactlyOnceWith(
+      "sheet.operation.cancel-mark-dirty-row-auto-height",
+      { unitId: "book", id: "pending" },
+      { onlyLocal: true }
+    );
+    notify("book", "next");
+    lifecycle.dispose();
+    expect(execute).toHaveBeenLastCalledWith(
+      "sheet.operation.cancel-mark-dirty-row-auto-height",
+      { unitId: "book", id: "next" },
+      { onlyLocal: true }
+    );
+    expect(unsubscribe).toHaveBeenCalledOnce();
+  });
   it("expands explicit header commands but ignores collaborative replays", () => {
     let listener: CommandListener = () => {};
     const unsubscribe = vi.fn();

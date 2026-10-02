@@ -29,9 +29,17 @@ type Props = Omit<React.HTMLAttributes<HTMLDivElement>, "title"> & {
   onClose?: () => void;
   /* Whether the sidebar should be scrollable */
   scrollable?: boolean;
+  /** Whether the mobile drawer starts open. */
+  defaultOpen?: boolean;
 };
 
-function SidebarLayout({ title, onClose, children, scrollable = true }: Props) {
+function SidebarLayout({
+  title,
+  onClose,
+  children,
+  scrollable = true,
+  defaultOpen = true,
+}: Props) {
   const { t } = useTranslation();
   const isMobile = useMobile();
   const isWrapped = React.useContext(RightSidebarWrappedContext);
@@ -48,8 +56,11 @@ function SidebarLayout({ title, onClose, children, scrollable = true }: Props) {
 
   if (isMobile) {
     return (
-      <Drawer onClose={onClose} defaultOpen>
-        <DrawerContent ref={setDrawerElement}>
+      <Drawer onClose={onClose} defaultOpen={defaultOpen}>
+        <DrawerContent
+          ref={setDrawerElement}
+          aria-label={typeof title === "string" ? title : undefined}
+        >
           <DrawerTitle>{title}</DrawerTitle>
           <PortalContext.Provider value={drawerElement}>
             {content}
@@ -66,6 +77,7 @@ function SidebarLayout({ title, onClose, children, scrollable = true }: Props) {
         <Tooltip content={t("Close")} shortcut="Esc">
           <Button
             icon={<ForwardIcon />}
+            aria-label={t("Close")}
             onClick={onClose}
             borderOnHover
             neutral

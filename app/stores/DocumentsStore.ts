@@ -772,12 +772,14 @@ export default class DocumentsStore extends Store<Document> {
     options: {
       revisionId?: string;
       collectionId?: string;
+      lastRevision?: number;
     } = {}
   ) => {
     const res = await client.post("/documents.restore", {
       id: document.id,
       revisionId: options.revisionId,
       collectionId: options.collectionId,
+      lastRevision: options.lastRevision,
     });
     runInAction(() => {
       invariant(res?.data, "Data should be available");

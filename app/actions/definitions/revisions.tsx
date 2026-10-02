@@ -11,6 +11,7 @@ import { matchPath } from "react-router-dom";
 import { toast } from "sonner";
 import { ExportContentType } from "@shared/types";
 import { RevisionHelper } from "@shared/utils/RevisionHelper";
+import { getTableDocument } from "@shared/utils/tableDocument";
 import Revision from "~/models/Revision";
 import stores from "~/stores";
 import type { ActionContext } from "~/types";
@@ -68,7 +69,9 @@ export const restoreRevision = createInternalLinkAction({
   visible: (context) =>
     !!context.activeDocumentId &&
     stores.policies.abilities(context.activeDocumentId).update &&
-    !!getActiveRevisionId(context),
+    !!getActiveRevisionId(context) &&
+    getActiveRevisionId(context) !==
+      RevisionHelper.latestId(context.activeDocumentId),
   to: (context) => {
     const revisionId = getActiveRevisionId(context);
     const document = context.activeDocumentId
@@ -81,7 +84,13 @@ export const restoreRevision = createInternalLinkAction({
 
     return {
       pathname: document.url,
-      state: { restore: true, revisionId },
+      state: {
+        restore: true,
+        revisionId,
+        tableRestore:
+          !!document.tableContent ||
+          !!getTableDocument(stores.revisions.get(revisionId)?.data),
+      },
     };
   },
 });

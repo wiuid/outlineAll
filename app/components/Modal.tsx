@@ -73,7 +73,7 @@ const Modal: React.FC<Props> = ({
                   <ErrorBoundary>{children}</ErrorBoundary>
                 </Centered>
               </MobileContent>
-              <Close onClick={onClose}>
+              <Close onClick={onClose} aria-label={t("Close")}>
                 <CloseIcon size={32} />
               </Close>
               <Back onClick={onClose}>

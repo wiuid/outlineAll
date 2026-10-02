@@ -283,6 +283,8 @@ export const DocumentsRestoreSchema = BaseSchema.extend({
 
     /** Id of document revision */
     revisionId: z.uuid().optional(),
+    /** Current document revision, required for restoring table content. */
+    lastRevision: z.number().int().nonnegative().optional(),
   }),
 });
 

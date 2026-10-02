@@ -12,6 +12,7 @@ import { s } from "@shared/styles";
 import type { NavigationNode } from "@shared/types";
 import { IconType, TOCPosition, TeamPreference } from "@shared/types";
 import { determineIconType } from "@shared/utils/icon";
+import { getTableDocument } from "@shared/utils/tableDocument";
 import type Document from "~/models/Document";
 import type Revision from "~/models/Revision";
 import DocumentMove from "~/components/DocumentExplorer/DocumentMove";
@@ -43,6 +44,7 @@ import SharedHeader from "./SharedHeader";
 type LocationState = {
   title?: string;
   restore?: boolean;
+  tableRestore?: boolean;
   revisionId?: string;
 };
 
@@ -77,19 +79,98 @@ const TableDocument = React.lazy(() =>
   }))
 );
 
+const TableRevisionDocument = React.lazy(() =>
+  import("./TableRevisionDocument").then((module) => ({
+    default: module.TableRevisionDocument,
+  }))
+);
+const TableRevisionRestoreDialog = React.lazy(() =>
+  import("./TableRevisionRestoreDialog").then((module) => ({
+    default: module.TableRevisionRestoreDialog,
+  }))
+);
+
 /** Selects the native table or Markdown editor before either save lifecycle mounts. */
 function DocumentScene(props: Props) {
+  const location = useLocation<LocationState>();
+  const history = useHistory();
+  const [restoreRevisionId, setRestoreRevisionId] = React.useState<string>();
+  const [tableGeneration, setTableGeneration] = React.useState(0);
+  const revisionTable = React.useMemo(
+    () => getTableDocument(props.revision?.data),
+    [props.revision?.data]
+  );
   const table = props.document.tableContent;
-  if (table && !props.revision) {
+  React.useEffect(() => {
+    if (
+      (table || location.state?.tableRestore) &&
+      !props.revision &&
+      location.state?.restore &&
+      location.state.revisionId
+    ) {
+      setRestoreRevisionId(location.state.revisionId);
+      history.replace({
+        ...location,
+        state: {
+          ...location.state,
+          restore: undefined,
+          revisionId: undefined,
+          tableRestore: undefined,
+        },
+      });
+    }
+  }, [table, props.revision, location, history]);
+  const restoreDialog = restoreRevisionId ? (
+    <React.Suspense fallback={null}>
+      <TableRevisionRestoreDialog
+        document={props.document}
+        revisionId={restoreRevisionId}
+        editable={
+          !!props.abilities.update &&
+          !props.document.isArchived &&
+          !props.document.isDeleted
+        }
+        onClose={() => setRestoreRevisionId(undefined)}
+        onRestored={() => {
+          setRestoreRevisionId(undefined);
+          setTableGeneration((generation) => generation + 1);
+        }}
+      />
+    </React.Suspense>
+  ) : null;
+  if (props.revision && revisionTable) {
     return (
       <ErrorBoundary>
         <React.Suspense fallback={<PlaceholderDocument />}>
-          <TableDocument key={props.document.id} {...props} table={table} />
+          <TableRevisionDocument
+            document={props.document}
+            revision={props.revision}
+            table={revisionTable}
+          />
         </React.Suspense>
       </ErrorBoundary>
     );
   }
-  return <ObservedMarkdownDocumentScene {...props} />;
+  if (table && !props.revision) {
+    return (
+      <ErrorBoundary>
+        <React.Suspense fallback={<PlaceholderDocument />}>
+          <TableDocument
+            key={`${props.document.id}:${tableGeneration}`}
+            {...props}
+            table={table}
+          />
+        </React.Suspense>
+        {restoreDialog}
+      </ErrorBoundary>
+    );
+  }
+  return (
+    <>
+      <ObservedMarkdownDocumentScene {...props} />
+      {restoreDialog}
+    </>
+  );
 }
 
 /** Scene component responsible for rendering and interacting with a document. */
@@ -103,7 +184,7 @@ function MarkdownDocumentScene({
   onCreateLink,
   children,
 }: Props) {
-  const { auth, ui, dialogs } = useStores();
+  const { auth, ui, dialogs, revisions } = useStores();
   const { t } = useTranslation();
   const history = useHistory();
   const location = useLocation<LocationState>();
@@ -143,7 +224,7 @@ function MarkdownDocumentScene({
       editor.commands.find({ text: searchTerm });
     }
 
-    if (!restore) {
+    if (!restore || location.state?.tableRestore) {
       return;
     }
 
@@ -162,13 +243,25 @@ function MarkdownDocumentScene({
     });
 
     if (response) {
+      // Listed revisions omit content; classify a table after loading it before
+      // the Markdown editor can replace its body with the serialized workbook.
+      const version = revisions.add(response.data);
+      if (getTableDocument(version.data)) {
+        history.replace(document.url, {
+          ...location.state,
+          restore: true,
+          revisionId,
+          tableRestore: true,
+        });
+        return;
+      }
       await replaceSelection(
         response.data,
         new AllSelection(editor.view.state.doc)
       );
       toast.success(t("Document restored"));
     }
-  }, [location, replaceSelection, t, history, document.url]);
+  }, [location, replaceSelection, t, history, document.url, revisions]);
 
   const onUndoRedo = useCallback(
     (event: KeyboardEvent) => {
