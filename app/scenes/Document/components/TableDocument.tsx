@@ -2395,7 +2395,7 @@ export const TableDocument = observer(function TableDocument({
         <FreezeOptions>
           <p>{freezeTarget?.destination}</p>
           <p data-table-freeze-status>
-            {t("Frozen rows: {{ rows }}; frozen columns: {{ columns }}", {
+            {t("Frozen rows {{ rows }}; frozen columns {{ columns }}", {
               rows: freezeTarget?.frozenRows ?? 0,
               columns: freezeTarget?.frozenColumns ?? 0,
             })}
