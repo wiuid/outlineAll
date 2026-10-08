@@ -24,6 +24,8 @@ import {
 import { performTableScriptRun } from "@server/commands/tableScriptExecutor";
 import * as runner from "@server/utils/tableScriptRunner";
 import environment from "@server/utils/environment";
+import * as formulas from "@server/utils/tableFormulaCalculator";
+import { TableCalculationUnavailableError } from "@server/errors";
 import { buildCollection, buildUser } from "@server/test/factories";
 import { getTestServer } from "@server/test/support";
 
@@ -98,6 +100,43 @@ async function fixture() {
 }
 
 describe("table collaboration database integration", () => {
+  it("rolls back a saturated calculation and accepts the identical request on retry", async () => {
+    const { user, id, state } = await fixture();
+    const body = {
+      documentId: id,
+      ...change(state, 0, 21),
+      exclusiveRevision: state.revision,
+    };
+    const calculate = vi
+      .spyOn(formulas, "calculateTableFormulas")
+      .mockRejectedValueOnce(TableCalculationUnavailableError());
+    try {
+      const busy = await server.post("/api/tableCollaboration.update", user, {
+        body,
+      });
+      expect(busy.status).toBe(503);
+      const unchanged = await server.post(
+        "/api/tableCollaboration.info",
+        user,
+        { body: { documentId: id } }
+      );
+      expect((await unchanged.json()).data.revision).toBe(state.revision);
+      const retry = await server.post("/api/tableCollaboration.update", user, {
+        body,
+      });
+      expect(retry.status).toBe(200);
+      expect((await retry.json()).data.revision).toBe(state.revision + 1);
+      const saved = await server.post("/api/documents.info", user, {
+        body: { id },
+      });
+      expect(
+        (await saved.json()).data.table.workbook.sheets.sheet.cellData[0][1].v
+      ).toBe(42);
+    } finally {
+      calculate.mockRestore();
+    }
+  });
+
   it("atomically merges concurrent editors, persists formula results and acknowledges duplicates", async () => {
     const { user, id, state } = await fixture();
     const other = await buildUser({ teamId: user.teamId });
@@ -132,6 +171,179 @@ describe("table collaboration database integration", () => {
     });
     expect(old.status).toBe(409);
   }, 20000);
+
+  it("reports the locked predecessor revision of its own commit", async () => {
+    const { user, id, state } = await fixture();
+    const updated = await server.post("/api/tableCollaboration.update", user, {
+      body: { documentId: id, ...change(state, 0, 18) },
+    });
+    expect(updated.status).toBe(200);
+    expect((await updated.json()).data).toMatchObject({
+      previousRevision: state.revision,
+      revision: state.revision + 1,
+    });
+  });
+
+  it("acknowledges an exact guarded retry without advancing the revision again", async () => {
+    const { user, id, state } = await fixture();
+    const body = {
+      documentId: id,
+      ...change(state, 0, 19),
+      exclusiveRevision: state.revision,
+    };
+    const first = await server.post("/api/tableCollaboration.update", user, {
+      body,
+    });
+    expect(first.status).toBe(200);
+    const retry = await server.post("/api/tableCollaboration.update", user, {
+      body,
+    });
+    expect(retry.status).toBe(200);
+    expect((await retry.json()).data).toMatchObject({
+      revision: state.revision + 1,
+      previousRevision: state.revision,
+      acknowledgedRevision: state.revision + 1,
+    });
+  });
+
+  it("acknowledges deletion-only retries without relying on state-vector clocks", async () => {
+    const { user, id, state } = await fixture();
+    const doc = new Y.Doc();
+    try {
+      Y.applyUpdate(doc, decodeTableBytes(state.update));
+      const before = materializeTable(doc);
+      const after = structuredClone(before);
+      after.sheets.sheet.cellData = {};
+      const layout = getTableLayout(doc);
+      captureTableChanges(
+        doc,
+        before,
+        after,
+        layout,
+        structuredClone(layout),
+        {}
+      );
+      expect(encodeTableBytes(Y.encodeStateVector(doc))).toBe(state.vector);
+      const body = {
+        documentId: id,
+        epoch: state.epoch,
+        baseRevision: state.revision,
+        exclusiveRevision: state.revision,
+        vector: state.vector,
+        update: encodeTableBytes(
+          Y.encodeStateAsUpdate(doc, decodeTableBytes(state.vector))
+        ),
+      };
+      const first = await server.post("/api/tableCollaboration.update", user, {
+        body,
+      });
+      expect(first.status).toBe(200);
+      const retry = await server.post("/api/tableCollaboration.update", user, {
+        body,
+      });
+      expect(retry.status).toBe(200);
+      expect((await retry.json()).data.revision).toBe(state.revision + 1);
+      const current = await server.post("/api/documents.info", user, {
+        body: { id },
+      });
+      expect(
+        (await current.json()).data.table.workbook.sheets.sheet.cellData[0]
+      ).toBeUndefined();
+    } finally {
+      doc.destroy();
+    }
+  });
+
+  it("recognizes its receipt after a peer commit without accepting changed content or another actor", async () => {
+    const { user, id, state } = await fixture();
+    const other = await buildUser({ teamId: user.teamId });
+    const body = {
+      documentId: id,
+      ...change(state, 0, 19),
+      exclusiveRevision: state.revision,
+    };
+    expect(
+      (await server.post("/api/tableCollaboration.update", user, { body }))
+        .status
+    ).toBe(200);
+    expect(
+      (
+        await server.post("/api/tableCollaboration.update", user, {
+          body: { ...body, title: "Unacknowledged title" },
+        })
+      ).status
+    ).toBe(409);
+    expect(
+      (await server.post("/api/tableCollaboration.update", other, { body }))
+        .status
+    ).toBe(409);
+    const info = await server.post("/api/tableCollaboration.info", other, {
+      body: { documentId: id },
+    });
+    const current = TableCollaborationResponseSchema.parse(
+      (await info.json()).data
+    );
+    const peer = await server.post("/api/tableCollaboration.update", other, {
+      body: {
+        documentId: id,
+        ...change(current, 1, 20),
+        exclusiveRevision: current.revision,
+      },
+    });
+    expect(peer.status).toBe(200);
+    const retry = await server.post("/api/tableCollaboration.update", user, {
+      body,
+    });
+    expect(retry.status).toBe(200);
+    expect((await retry.json()).data).toMatchObject({
+      previousRevision: state.revision,
+      acknowledgedRevision: state.revision + 1,
+      revision: state.revision + 2,
+    });
+    const saved = await server.post("/api/documents.info", user, {
+      body: { id },
+    });
+    expect(
+      (await saved.json()).data.table.workbook.sheets.sheet.cellData[1][0].v
+    ).toBe(20);
+  });
+
+  it("rejects client-written receipts rather than trusting forged acknowledgements", async () => {
+    const { user, id, state } = await fixture();
+    const doc = new Y.Doc();
+    try {
+      Y.applyUpdate(doc, decodeTableBytes(state.update));
+      doc.getMap<string>("properties").set(
+        '["saveReceipt"]',
+        JSON.stringify({
+          hash: "forged",
+          previousRevision: state.revision,
+          revision: state.revision + 1,
+        })
+      );
+      const response = await server.post(
+        "/api/tableCollaboration.update",
+        user,
+        {
+          body: {
+            documentId: id,
+            epoch: state.epoch,
+            baseRevision: state.revision,
+            update: encodeTableBytes(
+              Y.encodeStateAsUpdate(doc, decodeTableBytes(state.vector))
+            ),
+          },
+        }
+      );
+      expect(response.status).toBe(400);
+      const current = await server.post("/api/tableCollaboration.info", user, {
+        body: { documentId: id },
+      });
+      expect((await current.json()).data.revision).toBe(state.revision);
+    } finally {
+      doc.destroy();
+    }
+  });
 
   it("invalidates old collaboration epochs after an explicit API replacement", async () => {
     const { user, id, state } = await fixture();

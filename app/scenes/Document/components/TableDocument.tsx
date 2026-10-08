@@ -59,6 +59,7 @@ import {
   useCallback,
   useContext,
   useEffect,
+  useMemo,
   useRef,
   useState,
 } from "react";
@@ -106,6 +107,10 @@ import PageTitle from "~/components/PageTitle";
 import { useSplitView } from "~/components/SplitView/context";
 import useStores from "~/hooks/useStores";
 import { TableDocumentMenu } from "~/menus/TableDocumentMenu";
+import { TableDraftStorage } from "~/stores/TableDraftStorage";
+import { readTableRecovery } from "~/utils/tableRecovery";
+import { client } from "~/utils/ApiClient";
+import { TableCollaborationResponseSchema } from "@shared/utils/tableCollaboration";
 import { WebsocketContext } from "~/components/WebsocketProvider";
 import { TableCollaborationSession } from "~/stores/TableCollaborationSession";
 import { patchTableCells } from "~/utils/tableCollaborationView";
@@ -205,16 +210,113 @@ type TableFreezeMode = "firstRow" | "firstColumn" | "selection" | "none";
  * @param props the document, saved workbook and current access permissions.
  * @returns the workbook editor and Outline document actions.
  */
-export const TableDocument = observer(function TableDocument({
+export const TableDocument = observer(function TableDocument(props: Props) {
+  const { auth } = useStores();
+  const { t } = useTranslation();
+  const draftKey =
+    !props.shareId && auth.user && auth.team
+      ? getTableDraftKey(auth.team.id, auth.user.id, props.document.id)
+      : undefined;
+  const identity = JSON.stringify([
+    auth.team?.id,
+    auth.user?.id,
+    props.document.id,
+    props.shareId,
+  ]);
+  const access = useRef({ identity, editable: false });
+  access.current = {
+    identity,
+    editable:
+      !props.readOnly &&
+      !!auth.user &&
+      !!props.abilities.update &&
+      !props.shareId,
+  };
+  const [recovery, setRecovery] = useState<{
+    key: string;
+    storage: TableDraftStorage;
+    canWrite: () => boolean;
+  }>();
+
+  useEffect(() => {
+    let storage: Storage | undefined;
+    let factory: IDBFactory | undefined;
+    try {
+      storage = window.localStorage;
+    } catch {
+      // IndexedDB may remain available when localStorage is disabled.
+    }
+    try {
+      factory = window.indexedDB;
+    } catch {
+      // The synchronous mirror can still provide recovery.
+    }
+    const drafts = new TableDraftStorage({
+      keys: draftKey ? [draftKey, `${draftKey}:collaboration`] : [],
+      recoveryPrefix: draftKey?.slice(0, draftKey.lastIndexOf(":") + 1),
+      storage,
+      factory,
+    });
+    let alive = true;
+    void drafts.ready.then(() => {
+      if (alive) {
+        setRecovery({
+          key: identity,
+          storage: drafts,
+          canWrite: () =>
+            alive &&
+            access.current.identity === identity &&
+            access.current.editable,
+        });
+      }
+    });
+    return () => {
+      alive = false;
+      void drafts.dispose();
+    };
+  }, [draftKey, identity]);
+
+  if (!recovery || recovery.key !== identity) {
+    return <div role="status">{t("Loading…")}</div>;
+  }
+  return (
+    <TableDocumentEditor
+      key={identity}
+      {...props}
+      draftKey={draftKey}
+      draftStorage={recovery.storage}
+      canWrite={recovery.canWrite}
+    />
+  );
+});
+
+interface EditorProps extends Props {
+  draftKey?: string;
+  draftStorage: TableDraftStorage;
+  canWrite: () => boolean;
+}
+
+const TableDocumentEditor = observer(function TableDocumentEditor({
   document,
   table,
   readOnly,
   abilities,
   shareId,
   children,
-}: Props) {
+  draftKey,
+  draftStorage,
+  canWrite,
+}: EditorProps) {
   const { auth, dialogs, ui, tableScripts } = useStores();
   const { t, i18n } = useTranslation();
+  const otherDrafts = useMemo(
+    () =>
+      draftStorage.otherDrafts.flatMap(({ key, value }) => {
+        const recovered = readTableRecovery(value);
+        return recovered ? [{ key, ...recovered }] : [];
+      }),
+    [draftStorage.otherDrafts]
+  );
   const theme = useTheme();
   const history = useHistory();
   const { isSplitView, pane } = useSplitView();
@@ -282,16 +384,22 @@ export const TableDocument = observer(function TableDocument({
 
   const createSession = useCallback(
     (content: TableDocumentContent) => {
-      const draftKey =
-        editable && auth.user && auth.team
-          ? getTableDraftKey(auth.team.id, auth.user.id, document.id)
-          : undefined;
-      let storage: Storage | undefined;
-      try {
-        storage = draftKey ? localStorage : undefined;
-      } catch {
-        // Saving remains available even if browser storage is disabled.
-      }
+      const storage = draftKey
+        ? {
+            getItem: (key: string) => draftStorage.getItem(key),
+            flush: () => draftStorage.flush(),
+            setItem: (key: string, value: string) => {
+              if (canWrite()) {
+                draftStorage.setItem(key, value);
+              }
+            },
+            removeItem: (key: string) => {
+              if (canWrite()) {
+                draftStorage.removeItem(key);
+              }
+            },
+          }
+        : undefined;
       // A legacy snapshot draft keeps its existing recovery path. New native
       // sessions use operation-level collaboration; public shares remain viewers.
       let legacyDraft = false;
@@ -302,6 +410,17 @@ export const TableDocument = observer(function TableDocument({
       }
       if (content.version === 2 && auth.user && !shareId && !legacyDraft) {
         return new TableCollaborationSession({
+          request: async (method, body) => {
+            if (method !== "info" && !canWrite()) {
+              throw new Error("This table is read only.");
+            }
+            const result = await client.post(
+              `/tableCollaboration.${method}`,
+              { ...body },
+              { tableSave: true, retry: false }
+            );
+            return TableCollaborationResponseSchema.parse(result.data);
+          },
           documentId: document.id,
           title: document.title,
           revision: document.revision,
@@ -314,12 +433,17 @@ export const TableDocument = observer(function TableDocument({
         title: document.title,
         revision: document.revision,
         workbook: getTableWorkbook(content, document.title),
-        save: (request) => document.store.updateTable(document.id, request),
+        save: async (request) => {
+          if (!canWrite()) {
+            throw new Error("This table is read only.");
+          }
+          return document.store.updateTable(document.id, request);
+        },
         draftKey,
         storage,
       });
     },
-    [auth.team, auth.user, document, editable, shareId]
+    [auth.user, document, draftKey, draftStorage, shareId, canWrite]
   );
   const [session, setSession] = useState(() => createSession(table));
   const sessionLoaded =
@@ -2509,16 +2633,43 @@ export const TableDocument = observer(function TableDocument({
           </NoticeActions>
         </Notice>
       )}
-      {session.storageFailed && (
+      {(session.storageFailed ||
+        draftStorage.failed ||
+        (editable && !draftKey)) && (
         <Notice role="alert">
           {t(
-            "Local backup is unavailable. Keep this tab open until your changes are saved."
+            "The latest local backup is unavailable. A recovered draft may be older. Download a local copy before leaving this page."
           )}
         </Notice>
       )}
       {session.restored && !session.conflict && (
         <Notice role="status">
           {t("Recovered your unsaved local changes.")}
+        </Notice>
+      )}
+      {abilities.download && otherDrafts.length > 0 && (
+        <Notice role="status">
+          <span>
+            {t("Local drafts from other tabs are available to download.")}
+          </span>
+          <NoticeActions>
+            {otherDrafts.map(({ key, ...recovered }, index) => (
+              <Button
+                key={key}
+                neutral
+                onClick={() =>
+                  download(
+                    tableDocumentToMarkdown(recovered.table),
+                    `${recovered.title || t("Untitled")}-${index + 1}.md`,
+                    "text/markdown"
+                  )
+                }
+              >
+                {t("Download local copy")}: {recovered.title || t("Untitled")} (
+                {index + 1})
+              </Button>
+            ))}
+          </NoticeActions>
         </Notice>
       )}
       <Grid

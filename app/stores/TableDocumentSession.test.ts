@@ -176,8 +176,7 @@ describe("TableDocumentSession", () => {
     });
     const send = vi.fn().mockReturnValue(metadata.promise);
     const updating = session.updateMetadata(send);
-    await Promise.resolve();
-    expect(send).toHaveBeenCalledWith(2);
+    await vi.waitFor(() => expect(send).toHaveBeenCalledWith(2));
     session.setTitle("Edited while publishing");
     const saving = session.flush();
     expect(save).not.toHaveBeenCalled();
@@ -191,6 +190,44 @@ describe("TableDocumentSession", () => {
     });
     expect(session.baseRevision).toBe(4);
     session.dispose();
+  });
+
+  it("reserves metadata ownership before a reentrant workbook flush", async () => {
+    const metadata = deferred<{
+      value: boolean;
+      revision: number;
+      title: string;
+    }>();
+    const save = vi
+      .fn<(request: TableSaveRequest) => Promise<number>>()
+      .mockResolvedValue(3);
+    const session = new TableDocumentSession({
+      title: "Original",
+      revision: 1,
+      workbook: createTableWorkbook("Original"),
+      save,
+    });
+    let saving: Promise<void> | undefined;
+    const send = vi.fn(() => {
+      session.setTitle("Edited inside send");
+      saving = session.flush();
+      return metadata.promise;
+    });
+    const updating = session.updateMetadata(send);
+    try {
+      await vi.waitFor(() => expect(send).toHaveBeenCalled());
+      expect(save).not.toHaveBeenCalled();
+      metadata.resolve({ value: true, revision: 2, title: "Original" });
+      await updating;
+      await saving;
+      expect(save.mock.calls[0][0].lastRevision).toBe(2);
+      expect(session.hasPending).toBe(false);
+    } finally {
+      metadata.resolve({ value: true, revision: 2, title: "Original" });
+      await updating;
+      await saving;
+      session.dispose();
+    }
   });
 
   it("retains the draft on network errors and retries against the same revision", async () => {

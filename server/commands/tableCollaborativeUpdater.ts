@@ -33,6 +33,7 @@ export const TABLE_COLLABORATION_CHANNEL = "tables:committed";
 /** A bounded client delta, optionally guarded for complex native range moves. */
 export interface TableCollaborationInput {
   documentId: string;
+  clientId?: string;
   vector?: string;
   epoch?: string;
   update?: string;
@@ -71,6 +72,24 @@ export async function tableCollaborativeUpdater(
       transaction,
       !!input.update
     );
+    let previousRevision = document.revisionCount;
+    let acknowledgedRevision: number | undefined;
+    const requestHash = createHash("sha256")
+      .update(
+        JSON.stringify([
+          user.id,
+          document.id,
+          input.epoch,
+          input.clientId,
+          input.update,
+          input.title,
+          input.baseRevision,
+          input.exclusiveRevision,
+        ])
+      )
+      .digest("hex");
+    const receiptClient = `${user.id}:${input.clientId ?? requestHash}`;
+    let replay = false;
     const table = getTableDocument(await DocumentHelper.toJSON(document));
     if (!table || table.version !== 2) {
       throw ValidationError(
@@ -82,6 +101,16 @@ export async function tableCollaborativeUpdater(
       transaction,
     });
     if (record) {
+      const receipt =
+        input.update &&
+        record.saveReceipts.find(
+          (item) => item.client === receiptClient && item.hash === requestHash
+        );
+      if (receipt) {
+        replay = true;
+        previousRevision = receipt.previousRevision;
+        acknowledgedRevision = receipt.revision;
+      }
       const existing = new Y.Doc();
       try {
         Y.applyUpdate(existing, record.state);
@@ -106,6 +135,7 @@ export async function tableCollaborativeUpdater(
     }
     if (
       input.update &&
+      !replay &&
       record &&
       (input.baseRevision === undefined ||
         input.baseRevision < record.barrierRevision)
@@ -115,6 +145,7 @@ export async function tableCollaborativeUpdater(
       );
     }
     if (
+      !replay &&
       input.exclusiveRevision !== undefined &&
       input.exclusiveRevision !== document.revisionCount
     ) {
@@ -142,10 +173,13 @@ export async function tableCollaborativeUpdater(
         );
       }
       const before = Buffer.from(Y.encodeStateAsUpdate(doc));
-      if (input.update) {
+      if (input.update && !replay) {
         let workbook: IWorkbookData;
         try {
           Y.applyUpdate(doc, decodeTableBytes(input.update));
+          if (doc.getMap<string>("properties").has('["saveReceipt"]')) {
+            throw new Error("Save receipts are server-owned");
+          }
           validateTableCollaboration(doc);
           workbook = materializeTable(doc);
           if (workbook.id !== table.workbook.id) {
@@ -221,12 +255,33 @@ export async function tableCollaborativeUpdater(
             }
           });
         }
+        // Keep one exact acknowledgement per editing session, independent of
+        // subsequent peer commits and outside client-writable Yjs data. Bound
+        // inactive sessions; an evicted receipt never bypasses revision guards.
+        acknowledgedRevision = document.revisionCount;
+        await record.update(
+          {
+            saveReceipts: [
+              ...record.saveReceipts
+                .filter((item) => item.client !== receiptClient)
+                .slice(-255),
+              {
+                client: receiptClient,
+                hash: requestHash,
+                previousRevision,
+                revision: acknowledgedRevision,
+              },
+            ],
+          },
+          { transaction }
+        );
       }
       const vector =
         input.vector && input.epoch === record.id ? clientVector : undefined;
       return {
         epoch: record.id,
         revision: document.revisionCount,
+        ...(input.update && { previousRevision, acknowledgedRevision }),
         barrierRevision: record.barrierRevision,
         title: document.title,
         update: encodeTableBytes(Y.encodeStateAsUpdate(doc, vector)),

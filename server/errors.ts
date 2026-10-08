@@ -1,5 +1,21 @@
 import httpErrors from "http-errors";
 
+/**
+ * Reports temporary calculation saturation so table saves can retry safely.
+ *
+ * @returns a retryable response without treating valid workbook data as invalid.
+ */
+export function TableCalculationUnavailableError() {
+  return httpErrors(
+    503,
+    "Spreadsheet calculation is busy. Please save again shortly.",
+    {
+      id: "table_calculation_unavailable",
+      isReportable: false,
+    }
+  );
+}
+
 export function InternalError(message = "Internal error") {
   return httpErrors(500, message, {
     id: "internal_error",

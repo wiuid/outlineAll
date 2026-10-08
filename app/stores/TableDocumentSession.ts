@@ -146,9 +146,11 @@ export class TableDocumentSession {
     do {
       await this.flush();
     } while (this.dirty || this.inflight);
-    const pending = this.saveMetadata(send).finally(() => {
-      this.inflight = undefined;
-    });
+    const pending = Promise.resolve()
+      .then(() => this.saveMetadata(send))
+      .finally(() => {
+        this.inflight = undefined;
+      });
     this.inflight = pending;
     return pending;
   }
@@ -322,22 +324,25 @@ export class TableDocumentSession {
  * @param teamId the authenticated team identifier.
  * @param userId the authenticated user identifier.
  * @param documentId the edited document identifier.
- * @returns a storage key, or undefined when browser storage is unavailable.
+ * @returns a storage key, with a page-scoped fallback if sessionStorage is disabled.
  */
 export function getTableDraftKey(
   teamId: string,
   userId: string,
   documentId: string
-): string | undefined {
+): string {
+  let tabId = fallbackTabId;
   try {
     const tabKey = "outline-table-editor-tab";
-    const tabId = sessionStorage.getItem(tabKey) ?? uuid();
+    tabId = sessionStorage.getItem(tabKey) ?? tabId;
     sessionStorage.setItem(tabKey, tabId);
-    return `outline-table-draft:${teamId}:${userId}:${documentId}:${tabId}`;
   } catch {
-    return undefined;
+    // IndexedDB recovery remains usable when sessionStorage is unavailable.
   }
+  return `outline-table-draft:${teamId}:${userId}:${documentId}:${tabId}`;
 }
+
+const fallbackTabId = uuid();
 
 const draftSchema = z.object({
   title: z.string(),

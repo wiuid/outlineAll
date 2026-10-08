@@ -10,6 +10,14 @@ import {
 import Document from "./Document";
 import IdModel from "./base/IdModel";
 
+/** Server-owned acknowledgement for the latest request in one editing session. */
+export interface TableSaveReceipt {
+  client: string;
+  hash: string;
+  previousRevision: number;
+  revision: number;
+}
+
 /** Stores the durable Yjs state; its ID is the epoch of the native workbook. */
 @Table({ tableName: "table_collaborations", modelName: "tableCollaboration" })
 export class TableCollaboration extends IdModel<
@@ -27,4 +35,8 @@ export class TableCollaboration extends IdModel<
   @Default(0)
   @Column(DataType.INTEGER)
   barrierRevision: number;
+
+  @Default([])
+  @Column(DataType.JSONB)
+  saveReceipts: TableSaveReceipt[];
 }

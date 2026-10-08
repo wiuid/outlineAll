@@ -2036,5 +2036,7 @@
   "Worksheets": "工作表",
   "Add worksheet": "添加工作表",
   "Manage {{name}}": "管理 {{name}}",
-  "Manage worksheet": "管理工作表"
+  "Manage worksheet": "管理工作表",
+  "The latest local backup is unavailable. A recovered draft may be older. Download a local copy before leaving this page.": "最新的本地备份不可用，恢复的草稿可能不是最新版本。离开页面前请下载本地副本。",
+  "Local drafts from other tabs are available to download.": "发现其他标签页留下的本地草稿，可下载副本。"
 }

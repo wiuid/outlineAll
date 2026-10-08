@@ -7,6 +7,7 @@ import {
   runInAction,
 } from "mobx";
 import * as Y from "yjs";
+import { v4 as uuid } from "uuid";
 import { z } from "zod";
 import {
   captureTableChanges,
@@ -30,7 +31,14 @@ import type {
   TableSelection,
 } from "@shared/utils/tablePresence";
 import { client } from "~/utils/ApiClient";
-import { DocumentConflictError } from "~/utils/errors";
+import {
+  DocumentConflictError,
+  NetworkError,
+  OfflineError,
+  ServiceUnavailableError,
+  BadGatewayError,
+  RateLimitExceededError,
+} from "~/utils/errors";
 import { snapshotTable } from "~/utils/tableWorkbook";
 import type { TableMetadataResult } from "./TableSaveCoordinator";
 
@@ -40,7 +48,9 @@ interface Options {
   revision: number;
   workbook: IWorkbookData;
   draftKey?: string;
-  storage?: Pick<Storage, "getItem" | "setItem" | "removeItem">;
+  storage?: Pick<Storage, "getItem" | "setItem" | "removeItem"> & {
+    flush?: () => Promise<void>;
+  };
   request?: (
     method: string,
     body: Request
@@ -49,6 +59,7 @@ interface Options {
 
 interface Request {
   documentId: string;
+  clientId?: string;
   epoch?: string;
   vector?: string;
   update?: string;
@@ -57,13 +68,35 @@ interface Request {
   exclusiveRevision?: number;
 }
 
+const pendingSaveSchema = z.object({
+  sequence: z.number().int().nonnegative(),
+  title: z.string(),
+  exclusiveGeneration: z.number().int().nonnegative(),
+  request: z.object({
+    documentId: z.uuid(),
+    clientId: z.uuid().optional(),
+    epoch: z.uuid(),
+    vector: z.string(),
+    update: z.string(),
+    title: z.string().optional(),
+    baseRevision: z.number().int().nonnegative(),
+    exclusiveRevision: z.number().int().nonnegative().optional(),
+  }),
+});
+
 const draftSchema = z.object({
+  clientId: z.uuid().optional(),
   epoch: z.uuid(),
   state: z.string(),
   baseRevision: z.number(),
   title: z.string(),
   savedTitle: z.string(),
   exclusiveRevision: z.number().optional(),
+  viewRevision: z.number().int().nonnegative().optional(),
+  sequence: z.number().int().nonnegative().optional(),
+  acknowledged: z.number().int().nonnegative().optional(),
+  exclusiveGeneration: z.number().int().nonnegative().optional(),
+  pendingSave: pendingSaveSchema.optional(),
 });
 
 /**
@@ -96,7 +129,11 @@ export class TableCollaborationSession {
 
   /** Whether a native operation or title change still needs a database acknowledgement. */
   @computed get dirty(): boolean {
-    return this.sequence > this.acknowledged || this.title !== this.savedTitle;
+    return (
+      !!this.pendingSave ||
+      this.sequence > this.acknowledged ||
+      this.title !== this.savedTitle
+    );
   }
 
   /** Whether navigation or script execution must wait for a durable save. */
@@ -279,16 +316,19 @@ export class TableCollaborationSession {
    */
   async flush(): Promise<void> {
     clearTimeout(this.timer);
+    this.scheduledAt = undefined;
     await this.load();
     if (this.conflict) {
       throw this.error ?? new DocumentConflictError();
     }
     while (this.dirty || this.inflight) {
       if (!this.inflight) {
-        this.inflight = this.save().finally(() => {
-          this.inflight = undefined;
-          this.drainRefresh();
-        });
+        this.inflight = Promise.resolve()
+          .then(() => this.save())
+          .finally(() => {
+            this.inflight = undefined;
+            this.drainRefresh();
+          });
       }
       await this.inflight;
     }
@@ -303,29 +343,12 @@ export class TableCollaborationSession {
   async updateMetadata<T>(
     send: (revision: number) => Promise<TableMetadataResult<T>>
   ): Promise<T> {
-    await this.flush();
-    await this.refresh();
-    const title = this.title;
-    const pending = send(this.baseRevision).then((response) => {
-      runInAction(() => {
-        this.baseRevision = response.revision;
-        this.savedTitle = response.title;
-        if (this.title === title) {
-          this.title = response.title;
-        }
-      });
-      return response.value;
-    });
-    this.inflight = pending.then(
+    const pending = this.metadataQueue.then(() => this.saveMetadata(send));
+    this.metadataQueue = pending.then(
       () => undefined,
       () => undefined
     );
-    try {
-      return await pending;
-    } finally {
-      this.inflight = undefined;
-      this.drainRefresh();
-    }
+    return pending;
   }
 
   /** Undoes the most recent local transaction without undoing peer edits. */
@@ -445,6 +468,12 @@ export class TableCollaborationSession {
 
   /** Removes a draft only after explicit discard or saving it as a separate table. */
   @action discard(): void {
+    clearTimeout(this.timer);
+    this.pendingSave = undefined;
+    this.pendingRevision = undefined;
+    this.exclusiveRevision = undefined;
+    this.retryAt = undefined;
+    this.retryCount = 0;
     this.acknowledged = this.sequence;
     this.savedTitle = this.title;
     this.conflict = false;
@@ -463,6 +492,7 @@ export class TableCollaborationSession {
   @observable private acknowledged = 0;
   @observable private savedTitle: string;
   private epoch?: string;
+  private clientId = uuid();
   private serverVector?: string;
   private view: IWorkbookData;
   private layout: TableLayout = {};
@@ -474,7 +504,17 @@ export class TableCollaborationSession {
   private readonly origin = {};
   private undoManager?: Y.UndoManager;
   private inflight?: Promise<void>;
+  private metadataQueue: Promise<void> = Promise.resolve();
+  @observable.ref private pendingSave?: {
+    request: Request;
+    sequence: number;
+    title: string;
+    exclusiveGeneration: number;
+  };
   private timer?: ReturnType<typeof setTimeout>;
+  private scheduledAt?: number;
+  private retryAt?: number;
+  private retryCount = 0;
   private refreshPending = false;
   private disposed = false;
   private readonly listeners = new Set<() => void>();
@@ -542,37 +582,38 @@ export class TableCollaborationSession {
         documentId: this.options.documentId,
       });
       const draft = this.readDraft();
-      if (
-        draft &&
-        (draft.epoch !== response.epoch ||
-          draft.baseRevision < response.barrierRevision)
-      ) {
-        // Keep both the original epoch and its draft; do not overwrite recovery
-        // storage with the new server workbook when reporting this conflict.
+      if (draft) {
+        // Restore the local state before testing barriers so a rejected replay
+        // still leaves an exportable recovery snapshot, never a server substitute.
         this.epoch = draft.epoch;
+        this.clientId =
+          draft.clientId ??
+          draft.pendingSave?.request.clientId ??
+          this.clientId;
         this.pendingRevision = draft.baseRevision;
+        this.viewRevision = draft.viewRevision ?? draft.baseRevision;
         this.exclusiveRevision = draft.exclusiveRevision;
+        this.exclusiveGeneration = draft.exclusiveGeneration ?? 0;
+        this.pendingSave = draft.pendingSave;
         Y.applyUpdate(this.doc, decodeTableBytes(draft.state));
         runInAction(() => {
           this.table = snapshotTable(materializeTable(this.doc));
           this.title = draft.title;
           this.savedTitle = draft.savedTitle;
-          this.sequence++;
+          this.sequence = draft.sequence ?? 1;
+          this.acknowledged = draft.acknowledged ?? 0;
           this.restored = true;
         });
-        throw new DocumentConflictError();
+        if (draft.epoch !== response.epoch) {
+          throw new DocumentConflictError();
+        }
       }
-      this.receive(response);
-      if (draft) {
-        Y.applyUpdate(this.doc, decodeTableBytes(draft.state));
-        runInAction(() => {
-          this.sequence++;
-          this.title = draft.title;
-          this.savedTitle = draft.savedTitle;
-          this.restored = true;
-        });
-        this.pendingRevision = draft.baseRevision;
-        this.exclusiveRevision = draft.exclusiveRevision;
+      if (this.pendingSave) {
+        // The server validates the exact persisted request receipt before any
+        // guard bypass. Never fold newer draft mutations into this old request.
+        await this.save();
+      } else {
+        this.receive(response);
       }
       this.undoManager = new Y.UndoManager([...this.doc.share.values()], {
         trackedOrigins: new Set([this.origin]),
@@ -581,6 +622,7 @@ export class TableCollaborationSession {
       runInAction(() => {
         this.table = snapshotTable(materializeTable(this.doc));
         this.loaded = true;
+        this.restored = !!draft;
         this.error = undefined;
       });
       this.layout = getTableLayout(this.doc);
@@ -599,6 +641,11 @@ export class TableCollaborationSession {
 
   private async read(): Promise<void> {
     try {
+      // Resolve an uncertain guarded commit before its own barrier is read as
+      // a remote conflict. Replay exactly the request, not newer local edits.
+      if (this.pendingSave) {
+        await this.save();
+      }
       const response = await this.request("info", {
         documentId: this.options.documentId,
         epoch: this.epoch,
@@ -638,7 +685,9 @@ export class TableCollaborationSession {
       this.doc.on("update", this.handleUpdate);
       this.exclusiveRevision = undefined;
     }
-    const renamePending = this.title !== this.savedTitle;
+    const renamePending =
+      this.title !== this.savedTitle ||
+      (!!this.pendingSave && this.title !== this.pendingSave.title);
     this.epoch = response.epoch;
     this.serverVector = response.vector;
     runInAction(() => {
@@ -663,17 +712,57 @@ export class TableCollaborationSession {
     }
   }
 
-  private async save(): Promise<void> {
-    const sequence = this.sequence;
+  private async saveMetadata<T>(
+    send: (revision: number) => Promise<TableMetadataResult<T>>
+  ): Promise<T> {
+    do {
+      await this.flush();
+      await this.refresh();
+      // Background saves can acquire the slot during either await above.
+    } while (this.dirty || this.inflight);
     const title = this.title;
-    const exclusiveRevision = this.exclusiveRevision;
-    const exclusiveGeneration = this.exclusiveGeneration;
+    const revision = this.baseRevision;
     runInAction(() => {
       this.isSaving = true;
     });
+    // Reserve the slot before calling user-supplied code, including reentrant
+    // callbacks that capture a workbook and immediately request another flush.
+    const pending = Promise.resolve()
+      .then(() => send(revision))
+      .then((response) => {
+        this.advanceOwnRevision(revision, response.revision);
+        runInAction(() => {
+          this.baseRevision = response.revision;
+          this.savedTitle = response.title;
+          if (this.title === title) {
+            this.title = response.title;
+          }
+        });
+        return response.value;
+      });
+    this.inflight = pending.then(
+      () => undefined,
+      () => undefined
+    );
     try {
-      const response = await this.request("update", {
+      return await pending;
+    } finally {
+      runInAction(() => {
+        this.isSaving = false;
+      });
+      this.inflight = undefined;
+      this.drainRefresh();
+    }
+  }
+
+  private async save(): Promise<void> {
+    this.pendingSave ??= {
+      sequence: this.sequence,
+      title: this.title,
+      exclusiveGeneration: this.exclusiveGeneration,
+      request: {
         documentId: this.options.documentId,
+        clientId: this.clientId,
         epoch: this.epoch,
         vector: encodeTableBytes(Y.encodeStateVector(this.doc)),
         update: encodeTableBytes(
@@ -682,10 +771,45 @@ export class TableCollaborationSession {
             this.serverVector ? decodeTableBytes(this.serverVector) : undefined
           )
         ),
-        ...(title !== this.savedTitle && { title }),
+        ...(this.title !== this.savedTitle && { title: this.title }),
         baseRevision: this.pendingRevision ?? this.baseRevision,
-        exclusiveRevision,
-      });
+        exclusiveRevision: this.exclusiveRevision,
+      },
+    };
+    const { sequence, title, exclusiveGeneration, request } = this.pendingSave;
+    runInAction(() => {
+      this.isSaving = true;
+    });
+    try {
+      // A lost response is recoverable only if reload can replay this exact
+      // request. Later edits remain in the same draft with their own sequence.
+      this.persistDraft();
+      try {
+        await this.options.storage?.flush?.();
+      } catch {
+        runInAction(() => {
+          this.storageFailed = true;
+        });
+        // Keep cloud saving available when local storage itself is unavailable.
+      }
+      const response = await this.request("update", request);
+      // Only traverse a revision edge proved to be this request's own commit.
+      // A merged peer commit must never rebase an unseen exclusive operation.
+      if (response.previousRevision !== undefined) {
+        this.advanceOwnRevision(
+          response.previousRevision,
+          response.acknowledgedRevision ?? response.revision
+        );
+      }
+      if (
+        response.barrierRevision >
+          (response.acknowledgedRevision ?? response.revision) &&
+        (this.sequence > sequence || this.title !== title)
+      ) {
+        // Our old commit succeeded, but newer local edits still predate a peer's
+        // structural change. Preserve the local snapshot instead of rebasing it.
+        throw new DocumentConflictError();
+      }
       this.receive(response, true);
       runInAction(() => {
         this.acknowledged = sequence;
@@ -699,10 +823,27 @@ export class TableCollaborationSession {
       if (this.exclusiveGeneration === exclusiveGeneration) {
         this.exclusiveRevision = undefined;
       }
+      this.pendingSave = undefined;
       this.pendingRevision = this.dirty ? response.revision : undefined;
+      this.retryCount = 0;
+      this.retryAt = undefined;
       this.persistDraft();
     } catch (error) {
       this.reportError(error);
+      if (
+        this.retryCount < 5 &&
+        [
+          NetworkError,
+          OfflineError,
+          ServiceUnavailableError,
+          BadGatewayError,
+          RateLimitExceededError,
+        ].some((ErrorClass) => error instanceof ErrorClass)
+      ) {
+        this.retryAt =
+          Date.now() + Math.min(1000 * 2 ** this.retryCount++, 16000);
+        this.schedule();
+      }
       throw error;
     } finally {
       runInAction(() => {
@@ -711,16 +852,30 @@ export class TableCollaborationSession {
     }
   }
 
+  private advanceOwnRevision(previous: number, revision: number): void {
+    if (this.viewRevision === previous) {
+      this.viewRevision = revision;
+    }
+    if (this.exclusiveRevision === previous) {
+      this.exclusiveRevision = revision;
+    }
+  }
+
   private schedule(): void {
     clearTimeout(this.timer);
     if (this.disposed || !this.loaded || !this.dirty || this.conflict) {
+      this.scheduledAt = undefined;
       return;
     }
+    this.scheduledAt ??= Date.now();
+    const delay = this.retryAt
+      ? Math.max(0, this.retryAt - Date.now())
+      : Math.min(250, Math.max(0, this.scheduledAt + 2000 - Date.now()));
     this.timer = setTimeout(() => {
       void this.flush().catch(() => {
         /* The editor displays recoverable failures. */
       });
-    }, 250);
+    }, delay);
   }
 
   private drainRefresh(): void {
@@ -779,12 +934,18 @@ export class TableCollaborationSession {
       this.options.storage.setItem(
         this.draftKey,
         JSON.stringify({
+          clientId: this.clientId,
           epoch: this.epoch,
           state: encodeTableBytes(Y.encodeStateAsUpdate(this.doc)),
           baseRevision: this.pendingRevision ?? this.baseRevision,
           title: this.title,
           savedTitle: this.savedTitle,
           exclusiveRevision: this.exclusiveRevision,
+          viewRevision: this.viewRevision,
+          sequence: this.sequence,
+          acknowledged: this.acknowledged,
+          exclusiveGeneration: this.exclusiveGeneration,
+          pendingSave: this.pendingSave,
         })
       );
     } catch {

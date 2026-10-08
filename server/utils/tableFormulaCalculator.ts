@@ -1,7 +1,10 @@
 import { Worker } from "node:worker_threads";
-import type { IWorkbookData } from "@univerjs/core";
+import type { ICellData, IWorkbookData } from "@univerjs/core";
 import { UniverTableSchema } from "@shared/utils/tableDocument";
-import { ValidationError } from "@server/errors";
+import {
+  TableCalculationUnavailableError,
+  ValidationError,
+} from "@server/errors";
 
 let activeCalculations = 0;
 
@@ -12,14 +15,26 @@ let activeCalculations = 0;
  * @param snapshot the validated native snapshot to calculate.
  * @returns the calculated snapshot with all browser plugin resources retained.
  * @throws {ValidationError} if calculation exceeds its time or memory budget.
+ * @throws {TableCalculationUnavailableError} if the calculation pool is full.
  */
 export async function calculateTableFormulas(
   snapshot: IWorkbookData
 ): Promise<IWorkbookData> {
+  // Plain data/image tables have nothing to calculate. Avoid starting a worker
+  // (and occupying the document lock) on every autosave in those workbooks.
+  const hasFormulas = Object.values(snapshot.sheets).some((sheet) =>
+    Object.values(sheet.cellData ?? {}).some((row) =>
+      Object.values<ICellData>(row).some((cell) => cell?.f || cell?.si)
+    )
+  );
+  const hasFormulaResources = snapshot.resources?.some((resource) =>
+    /formula/i.test(resource.name)
+  );
+  if (!hasFormulas && !hasFormulaResources) {
+    return snapshot;
+  }
   if (activeCalculations >= 4) {
-    throw ValidationError(
-      "Spreadsheet calculation is busy. Please save again shortly."
-    );
+    throw TableCalculationUnavailableError();
   }
   activeCalculations++;
   try {

@@ -25,6 +25,7 @@ const info = BaseSchema.extend({
 const update = BaseSchema.extend({
   body: z.object({
     documentId: zodIdType(),
+    clientId: z.uuid().optional(),
     epoch: z.uuid(),
     vector,
     update: z

@@ -31,6 +31,10 @@ export interface TableLayout {
 export const TableCollaborationResponseSchema = z.object({
   epoch: z.uuid(),
   revision: z.number().int().positive(),
+  // The locked revision edge belonging to this update (or its exact receipt).
+  // Absent on reads and responses from older servers: never infer this edge.
+  previousRevision: z.number().int().positive().optional(),
+  acknowledgedRevision: z.number().int().positive().optional(),
   barrierRevision: z.number().int().nonnegative(),
   title: z.string(),
   update: z.string(),
